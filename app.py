@@ -1,301 +1,282 @@
-from __future__ import annotations
-
-import numpy as np
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import numpy as np
 
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
 
-def clean_text(value) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip()
+st.set_page_config(
+    page_title="Insurance Insurer Comparison Engine",
+    layout="wide"
+)
 
+# ---------------------------------------------------
+# TITLE
+# ---------------------------------------------------
 
-def extract_rate_blocks(uploaded_file, sheet_name: str = "LAP Reducing") -> pd.DataFrame:
-    raw = pd.read_excel(uploaded_file, sheet_name=sheet_name, header=None)
+st.title("Insurance Insurer Comparison Dashboard")
 
-    records = []
-    entry_age_cells = []
+st.write("""
+This dashboard helps compare insurers based on:
 
-    for row_idx in raw.index:
-        for col_idx in raw.columns:
-            if clean_text(raw.iat[row_idx, col_idx]).lower() == "entry age":
-                entry_age_cells.append((row_idx, col_idx))
+- Rate Per Lakh
+- COA %
+- Age
+- Tenure
+- Overall business attractiveness
+""")
 
-    if not entry_age_cells:
-        raise ValueError("No 'Entry Age' table found in the uploaded Excel file.")
+# ---------------------------------------------------
+# FILE UPLOAD
+# ---------------------------------------------------
 
-    for header_row, start_col in entry_age_cells:
-        insurer = clean_text(raw.iat[max(header_row - 2, 0), start_col])
-        product = clean_text(raw.iat[max(header_row - 1, 0), start_col])
+uploaded_file = st.file_uploader(
+    "Upload Insurer Comparison Excel/CSV",
+    type=["xlsx", "csv"]
+)
 
-        if not insurer:
-            insurer = f"Insurer {start_col}"
+# ---------------------------------------------------
+# MAIN LOGIC
+# ---------------------------------------------------
 
-        if not product:
-            product = sheet_name
+if uploaded_file:
 
-        term_cols = []
-        col = start_col + 1
+    # Read file
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
 
-        while col in raw.columns and pd.notna(raw.iat[header_row, col]):
-            term_cols.append((col, int(raw.iat[header_row, col])))
-            col += 1
+    st.subheader("Uploaded Data")
 
-        row = header_row + 1
+    st.dataframe(df)
 
-        while row in raw.index and pd.notna(raw.iat[row, start_col]):
-            age = int(raw.iat[row, start_col])
+    # ---------------------------------------------------
+    # REQUIRED COLUMNS
+    # ---------------------------------------------------
 
-            for term_col, term in term_cols:
-                premium_rate = raw.iat[row, term_col]
-
-                if pd.notna(premium_rate):
-                    records.append(
-                        {
-                            "insurer": insurer.upper(),
-                            "product": product,
-                            "age": age,
-                            "term_years": term,
-                            "premium_rate": float(premium_rate),
-                        }
-                    )
-
-            row += 1
-
-    data = pd.DataFrame(records)
-
-    if data.empty:
-        raise ValueError("No premium rates could be extracted.")
-
-    return data.sort_values(["insurer", "age", "term_years"]).reset_index(drop=True)
-
-
-def train_simple_model(data: pd.DataFrame):
-    insurers = sorted(data["insurer"].unique())
-
-    age = data["age"].to_numpy(dtype=float)
-    term = data["term_years"].to_numpy(dtype=float)
-
-    columns = [
-        np.ones(len(data)),
-        age,
-        term,
-        age ** 2,
-        term ** 2,
-        age * term,
+    required_cols = [
+        'Insurer',
+        'Age',
+        'Tenure',
+        'Rate_Per_Lakh',
+        'COA'
     ]
 
-    for insurer in insurers[1:]:
-        columns.append((data["insurer"].to_numpy() == insurer).astype(float))
+    # Check columns
+    if all(col in df.columns for col in required_cols):
 
-    x = np.column_stack(columns)
-    y = np.log1p(data["premium_rate"].to_numpy(dtype=float))
+        # ---------------------------------------------------
+        # DATA CLEANING
+        # ---------------------------------------------------
 
-    ridge = 1e-6 * np.eye(x.shape[1])
-    coefficients = np.linalg.solve(x.T @ x + ridge, x.T @ y)
+        df['Rate_Per_Lakh'] = pd.to_numeric(
+            df['Rate_Per_Lakh'],
+            errors='coerce'
+        )
 
-    return {
-        "insurers": insurers,
-        "coefficients": coefficients,
-    }
+        df['COA'] = pd.to_numeric(
+            df['COA'],
+            errors='coerce'
+        )
 
+        df['Age'] = pd.to_numeric(
+            df['Age'],
+            errors='coerce'
+        )
 
-def predict_rate(model, insurer: str, age: int, term_years: int) -> float:
-    insurers = model["insurers"]
-    coefficients = model["coefficients"]
+        df['Tenure'] = pd.to_numeric(
+            df['Tenure'],
+            errors='coerce'
+        )
 
-    features = [
-        1.0,
-        age,
-        term_years,
-        age ** 2,
-        term_years ** 2,
-        age * term_years,
-    ]
+        # Remove missing values
+        df = df.dropna()
 
-    for extra_insurer in insurers[1:]:
-        features.append(1.0 if insurer == extra_insurer else 0.0)
+        # ---------------------------------------------------
+        # BUSINESS SCORING LOGIC
+        # ---------------------------------------------------
 
-    return float(np.expm1(np.array(features) @ coefficients))
+        # Lower Rate = Better
+        df['Rate_Score'] = (
+            (1 / df['Rate_Per_Lakh']) /
+            (1 / df['Rate_Per_Lakh']).max()
+        ) * 100
 
+        # Higher COA = Better
+        df['COA_Score'] = (
+            df['COA'] /
+            df['COA'].max()
+        ) * 100
 
-def compare_premiums(
-    data: pd.DataFrame,
-    model,
-    age: int,
-    term_years: int,
-    payment_mode: str,
-    sum_assured: float,
-    monthly_loading: float,
-) -> pd.DataFrame:
-    rows = []
+        # Stability score
+        # Lower variance across age/tenure preferred
+        df['Stability_Score'] = 100 - (
+            (
+                df['Rate_Per_Lakh'] -
+                df['Rate_Per_Lakh'].mean()
+            ).abs()
+            /
+            df['Rate_Per_Lakh'].max()
+        ) * 100
 
-    for insurer in sorted(data["insurer"].unique()):
-        insurer_data = data[data["insurer"] == insurer]
-        product = insurer_data["product"].iloc[0]
+        # Final weighted score
+        df['Final_Score'] = (
+            df['Rate_Score'] * 0.50 +
+            df['COA_Score'] * 0.30 +
+            df['Stability_Score'] * 0.20
+        )
 
-        exact = insurer_data[
-            (insurer_data["age"] == age)
-            & (insurer_data["term_years"] == term_years)
+        # ---------------------------------------------------
+        # SHOW SCORES
+        # ---------------------------------------------------
+
+        st.subheader("Calculated Insurer Scores")
+
+        st.dataframe(
+            df[
+                [
+                    'Insurer',
+                    'Age',
+                    'Tenure',
+                    'Rate_Per_Lakh',
+                    'COA',
+                    'Rate_Score',
+                    'COA_Score',
+                    'Stability_Score',
+                    'Final_Score'
+                ]
+            ]
+        )
+
+        # ---------------------------------------------------
+        # INSURER RANKING
+        # ---------------------------------------------------
+
+        ranking = (
+            df.groupby('Insurer')['Final_Score']
+            .mean()
+            .reset_index()
+            .sort_values(
+                by='Final_Score',
+                ascending=False
+            )
+        )
+
+        st.subheader("Overall Insurer Ranking")
+
+        st.dataframe(ranking)
+
+        # Best insurer
+        best_insurer = ranking.iloc[0]['Insurer']
+
+        best_score = ranking.iloc[0]['Final_Score']
+
+        st.success(
+            f"""
+            Best Overall Insurer:
+            {best_insurer}
+
+            Average Business Score:
+            {best_score:.2f}
+            """
+        )
+
+        # ---------------------------------------------------
+        # FILTERS
+        # ---------------------------------------------------
+
+        st.sidebar.header("Filters")
+
+        selected_age = st.sidebar.selectbox(
+            "Select Age",
+            sorted(df['Age'].unique())
+        )
+
+        selected_tenure = st.sidebar.selectbox(
+            "Select Tenure",
+            sorted(df['Tenure'].unique())
+        )
+
+        # Filtered Data
+        filtered_df = df[
+            (df['Age'] == selected_age) &
+            (df['Tenure'] == selected_tenure)
         ]
 
-        if not exact.empty:
-            rate_per_1000 = float(exact["premium_rate"].iloc[0])
-            basis = "Exact table rate"
-        elif insurer_data["age"].min() <= age <= insurer_data["age"].max():
-            rate_per_1000 = predict_rate(model, insurer, age, term_years)
-            basis = "ML estimate"
-        else:
-            continue
-
-        yearly_premium = rate_per_1000 * (sum_assured / 1000)
-
-        if payment_mode == "Monthly":
-            premium = yearly_premium * monthly_loading / 12
-        else:
-            premium = yearly_premium
-
-        rows.append(
-            {
-                "Insurer": insurer,
-                "Product": product,
-                "Age Range": f"{insurer_data['age'].min()}-{insurer_data['age'].max()}",
-                "Term": term_years,
-                "Rate per 1000": round(rate_per_1000, 2),
-                "Payment Mode": payment_mode,
-                "Premium": round(premium, 2),
-                "Basis": basis,
-            }
+        st.subheader(
+            f"Comparison for Age {selected_age} | Tenure {selected_tenure}"
         )
 
-    result = pd.DataFrame(rows)
+        st.dataframe(filtered_df)
 
-    if result.empty:
-        return result
+        # ---------------------------------------------------
+        # BEST FILTERED INSURER
+        # ---------------------------------------------------
 
-    return result.sort_values("Premium").reset_index(drop=True)
+        if not filtered_df.empty:
 
+            best_filtered = filtered_df.sort_values(
+                by='Final_Score',
+                ascending=False
+            ).iloc[0]
 
-def main():
-    st.set_page_config(
-        page_title="Premium Rate Comparison",
-        page_icon="📊",
-        layout="wide",
-    )
+            st.info(
+                f"""
+                Best insurer for selected criteria:
 
-    st.title("Premium Rate Comparison")
-    st.caption("Upload insurer premium rate Excel and compare premiums by age, term, and payment mode.")
+                {best_filtered['Insurer']}
 
-    uploaded_file = st.file_uploader(
-        "Upload premium rate Excel file",
-        type=["xlsx"],
-    )
+                Rate Per Lakh:
+                {best_filtered['Rate_Per_Lakh']}
 
-    if uploaded_file is None:
-        st.info("Upload the Excel file to start comparison.")
-        return
-
-    try:
-        data = extract_rate_blocks(uploaded_file)
-    except Exception as error:
-        st.error(f"Could not read Excel file: {error}")
-        return
-
-    model = train_simple_model(data)
-
-    min_age = int(data["age"].min())
-    max_age = int(data["age"].max())
-    terms = sorted(data["term_years"].unique())
-
-    with st.sidebar:
-        st.header("Quote Inputs")
-
-        age = st.slider(
-            "Entry Age",
-            min_value=min_age,
-            max_value=max_age,
-            value=min_age,
-        )
-
-        term_years = st.selectbox(
-            "Policy Term",
-            options=terms,
-        )
-
-        payment_mode = st.radio(
-            "Payment Mode",
-            options=["Yearly", "Monthly"],
-            horizontal=True,
-        )
-
-        sum_assured = st.number_input(
-            "Sum Assured",
-            min_value=100000,
-            max_value=100000000,
-            value=1000000,
-            step=100000,
-        )
-
-        monthly_loading = st.number_input(
-            "Monthly Loading Factor",
-            min_value=1.0,
-            max_value=1.5,
-            value=1.0,
-            step=0.01,
-            help="Use 1.00 if monthly premium is yearly premium divided by 12.",
-        )
-
-    result = compare_premiums(
-        data=data,
-        model=model,
-        age=age,
-        term_years=int(term_years),
-        payment_mode=payment_mode,
-        sum_assured=float(sum_assured),
-        monthly_loading=float(monthly_loading),
-    )
-
-    if result.empty:
-        st.warning("No insurer data available for the selected age and term.")
-        return
-
-    cheapest = result.iloc[0]
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Lowest Insurer", cheapest["Insurer"])
-    col2.metric("Lowest Premium", f"{cheapest['Premium']:,.2f}")
-    col3.metric("Insurers Compared", len(result))
-
-    st.subheader("Premium Comparison")
-    st.dataframe(result, use_container_width=True, hide_index=True)
-
-    st.subheader("Premium Chart")
-    chart_data = result.set_index("Insurer")[["Premium"]]
-    st.bar_chart(chart_data, use_container_width=True)
-
-    st.download_button(
-        label="Download Comparison CSV",
-        data=result.to_csv(index=False).encode("utf-8"),
-        file_name="premium_comparison.csv",
-        mime="text/csv",
-    )
-
-    with st.expander("Data Coverage"):
-        coverage = (
-            data.groupby("insurer")
-            .agg(
-                min_age=("age", "min"),
-                max_age=("age", "max"),
-                min_term=("term_years", "min"),
-                max_term=("term_years", "max"),
-                records=("premium_rate", "count"),
+                COA:
+                {best_filtered['COA']}%
+                """
             )
-            .reset_index()
-        )
 
-        st.dataframe(coverage, use_container_width=True, hide_index=True)
+        # ---------------------------------------------------
+        # BUSINESS INSIGHTS
+        # ---------------------------------------------------
 
+        st.subheader("Business Interpretation")
 
-if __name__ == "__main__":
-    main()
+        st.write("""
+        ### How Final Score is Calculated
+
+        - Lower Rate Per Lakh = Better customer pricing
+        - Higher COA = Better broker economics
+        - Stable pricing across age & tenure = Better scalability
+
+        ### Best Insurer Usually Means:
+
+        - Competitive pricing
+        - Sustainable COA
+        - Better age-term stability
+        - Better business scalability
+
+        ### Use Cases
+
+        - Group Insurance
+        - Affinity Business
+        - Embedded Insurance
+        - PA / CI / GCL / GTL Comparison
+        """)
+
+    else:
+
+        st.error(f"""
+        Missing Required Columns.
+
+        Required Columns:
+        {required_cols}
+        """)
+
+# ---------------------------------------------------
+# NO FILE
+# ---------------------------------------------------
+
+else:
+
+    st.warning("Please upload an Excel or CSV file.")
