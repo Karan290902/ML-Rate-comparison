@@ -112,7 +112,7 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # ADD INSURER
+        # ADD INSURER + COA
         # ---------------------------------------------------
 
         df_long['Insurer'] = insurer_name
@@ -152,7 +152,7 @@ if uploaded_files:
     )
 
     # ---------------------------------------------------
-    # FILTERS
+    # SIDEBAR FILTERS
     # ---------------------------------------------------
 
     st.sidebar.header("Filters")
@@ -168,7 +168,7 @@ if uploaded_files:
     )
 
     # ---------------------------------------------------
-    # FILTERED DATA
+    # FILTER DATA
     # ---------------------------------------------------
 
     filtered_df = final_df[
@@ -181,7 +181,7 @@ if uploaded_files:
     )
 
     # ---------------------------------------------------
-    # SUMMARY CARDS
+    # OVERALL ANALYSIS
     # ---------------------------------------------------
 
     overall_rates = (
@@ -192,14 +192,21 @@ if uploaded_files:
         .reset_index()
     )
 
+    overall_rates['COA'] = overall_rates[
+        'Insurer'
+    ].map(coa_inputs)
+
+    # ---------------------------------------------------
+    # SUMMARY CARDS
+    # ---------------------------------------------------
+
     cheapest_overall = overall_rates.loc[
         overall_rates['Rate_Per_Lakh'].idxmin()
     ]
 
-    highest_coa = max(
-        coa_inputs,
-        key=coa_inputs.get
-    )
+    highest_coa = overall_rates.loc[
+        overall_rates['COA'].idxmax()
+    ]
 
     stability = (
         final_df.groupby('Insurer')[
@@ -219,7 +226,7 @@ if uploaded_files:
 
     col2.metric(
         "Highest COA",
-        highest_coa
+        highest_coa['Insurer']
     )
 
     col3.metric(
@@ -262,7 +269,7 @@ if uploaded_files:
         )
 
     # ---------------------------------------------------
-    # SIDE-BY-SIDE MATRIX
+    # SIDE-BY-SIDE COMPARISON
     # ---------------------------------------------------
 
     st.subheader("Side-by-Side Rate Comparison")
@@ -389,35 +396,94 @@ if uploaded_files:
     )
 
     # ---------------------------------------------------
-    # BEST VALUE INSURER
+    # BEST BALANCED INSURER
     # ---------------------------------------------------
 
-    st.subheader("Best Value Insurer")
+    st.subheader("Best Balanced Insurer")
 
     value_df = overall_rates.copy()
 
-    value_df['COA'] = value_df['Insurer'].map(
-        coa_inputs
-    )
+    lowest_rate = value_df['Rate_Per_Lakh'].min()
 
-    value_df['Value_Index'] = (
-        value_df['COA']
+    value_df['Price_Difference_%'] = (
+        (
+            value_df['Rate_Per_Lakh'] -
+            lowest_rate
+        )
         /
-        value_df['Rate_Per_Lakh']
+        lowest_rate
+    ) * 100
+
+    value_df['Price_Difference_%'] = (
+        value_df['Price_Difference_%']
+        .round(2)
     )
 
-    best_value = value_df.loc[
-        value_df['Value_Index'].idxmax()
+    # ---------------------------------------------------
+    # LOGIC
+    # ---------------------------------------------------
+
+    balanced_candidates = value_df[
+        value_df['Price_Difference_%'] <= 10
     ]
+
+    if not balanced_candidates.empty:
+
+        best_balanced = balanced_candidates.sort_values(
+            by='COA',
+            ascending=False
+        ).iloc[0]
+
+    else:
+
+        best_balanced = value_df.loc[
+            value_df['Rate_Per_Lakh'].idxmin()
+        ]
+
+    # ---------------------------------------------------
+    # REASON
+    # ---------------------------------------------------
+
+    reason = ""
+
+    if best_balanced['Price_Difference_%'] <= 5:
+
+        reason = """
+Very competitive pricing with attractive COA.
+Strong overall commercial proposition.
+"""
+
+    elif best_balanced['Price_Difference_%'] <= 10:
+
+        reason = """
+Slight pricing increase is justified
+by better COA economics.
+Balanced commercial proposition.
+"""
+
+    else:
+
+        reason = """
+Lowest pricing dominates commercial decision.
+Higher COA insurers not sufficiently justified.
+"""
 
     st.success(
         f"""
-Best Value Insurer:
-{best_value['Insurer']}
+Best Balanced Insurer:
+{best_balanced['Insurer']}
+
+Average Rate:
+{round(best_balanced['Rate_Per_Lakh'], 2)}
+
+COA:
+{best_balanced['COA']}%
+
+Pricing Difference vs Cheapest:
+{round(best_balanced['Price_Difference_%'], 2)}%
 
 Reason:
-- Better balance between pricing and COA
-- Commercially attractive proposition
+{reason}
 """
     )
 
@@ -429,7 +495,7 @@ Reason:
 
     recommendations = ""
 
-    for _, row in value_df.iterrows():
+    for _, row in overall_rates.iterrows():
 
         insurer = row['Insurer']
         rate = row['Rate_Per_Lakh']
@@ -437,38 +503,48 @@ Reason:
 
         pricing_view = ""
 
-        if rate <= value_df['Rate_Per_Lakh'].quantile(0.25):
+        if rate <= overall_rates['Rate_Per_Lakh'].quantile(0.25):
+
             pricing_view = "Excellent Pricing"
 
-        elif rate <= value_df['Rate_Per_Lakh'].median():
+        elif rate <= overall_rates['Rate_Per_Lakh'].median():
+
             pricing_view = "Good Pricing"
 
         else:
+
             pricing_view = "Higher Pricing"
 
         coa_view = ""
 
-        if coa >= value_df['COA'].quantile(0.75):
+        if coa >= overall_rates['COA'].quantile(0.75):
+
             coa_view = "Strong COA"
 
-        elif coa >= value_df['COA'].median():
+        elif coa >= overall_rates['COA'].median():
+
             coa_view = "Moderate COA"
 
         else:
+
             coa_view = "Lower COA"
 
         recommendation = ""
 
         if pricing_view == "Excellent Pricing" and coa_view == "Strong COA":
+
             recommendation = "Excellent Commercial Proposition"
 
         elif pricing_view == "Excellent Pricing":
+
             recommendation = "Best for Scale Business"
 
         elif coa_view == "Strong COA":
+
             recommendation = "Best for Revenue Focus"
 
         else:
+
             recommendation = "Balanced Proposition"
 
         recommendations += f"""
@@ -479,6 +555,9 @@ Pricing:
 
 COA:
 - {coa_view}
+
+Average Rate:
+- {round(rate, 2)}
 
 Recommendation:
 - {recommendation}
@@ -580,7 +659,7 @@ Recommendation:
         value_df.to_excel(
             writer,
             index=False,
-            sheet_name='Value Analysis'
+            sheet_name='Balanced Analysis'
         )
 
     st.download_button(
