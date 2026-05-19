@@ -57,6 +57,10 @@ if uploaded_files:
 
         insurer_name = uploaded_file.name.split(".")[0]
 
+        # ---------------------------------------------------
+        # COA INPUT
+        # ---------------------------------------------------
+
         coa = st.sidebar.text_input(
             f"{insurer_name} COA %",
             value=""
@@ -69,13 +73,19 @@ if uploaded_files:
 
         coa_inputs[insurer_name] = coa
 
-        # Read File
+        # ---------------------------------------------------
+        # READ FILE
+        # ---------------------------------------------------
+
         if uploaded_file.name.endswith(".csv"):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
 
-        # Validation
+        # ---------------------------------------------------
+        # VALIDATION
+        # ---------------------------------------------------
+
         if 'Entry Age' not in df.columns:
 
             st.error(
@@ -84,7 +94,10 @@ if uploaded_files:
 
             continue
 
-        # Convert to long format
+        # ---------------------------------------------------
+        # CONVERT TO LONG FORMAT
+        # ---------------------------------------------------
+
         df_long = df.melt(
             id_vars=['Entry Age'],
             var_name='Tenure',
@@ -98,12 +111,18 @@ if uploaded_files:
             inplace=True
         )
 
-        # Add insurer
+        # ---------------------------------------------------
+        # ADD INSURER
+        # ---------------------------------------------------
+
         df_long['Insurer'] = insurer_name
 
         df_long['COA'] = coa
 
-        # Clean data
+        # ---------------------------------------------------
+        # CLEAN DATA
+        # ---------------------------------------------------
+
         df_long['Age'] = pd.to_numeric(
             df_long['Age'],
             errors='coerce'
@@ -149,7 +168,7 @@ if uploaded_files:
     )
 
     # ---------------------------------------------------
-    # FILTER DATA
+    # FILTERED DATA
     # ---------------------------------------------------
 
     filtered_df = final_df[
@@ -382,7 +401,8 @@ if uploaded_files:
     )
 
     value_df['Value_Index'] = (
-        value_df['COA'] /
+        value_df['COA']
+        /
         value_df['Rate_Per_Lakh']
     )
 
@@ -396,34 +416,66 @@ Best Value Insurer:
 {best_value['Insurer']}
 
 Reason:
-- Strong balance between pricing and COA
-- Better commercial attractiveness
+- Better balance between pricing and COA
+- Commercially attractive proposition
 """
     )
 
     # ---------------------------------------------------
-    # HEATMAP
+    # SIMPLE HEATMAP
     # ---------------------------------------------------
 
-    st.subheader("Heatmap Dashboard")
+    st.subheader("Cheapest Insurer Heatmap")
 
-    heatmap_data = final_df.pivot_table(
+    heatmap_df = (
+        final_df.loc[
+            final_df.groupby(
+                ['Age']
+            )['Rate_Per_Lakh'].idxmin()
+        ][['Age', 'Insurer']]
+    )
+
+    heatmap_df['Value'] = (
+        heatmap_df['Insurer']
+        .astype('category')
+        .cat.codes
+    )
+
+    heatmap_pivot = heatmap_df.pivot_table(
         index='Age',
-        columns='Insurer',
-        values='Rate_Per_Lakh'
+        values='Value'
     )
 
     fig_heatmap = px.imshow(
-        heatmap_data,
-        text_auto=True,
+        heatmap_pivot,
         aspect='auto',
-        title="Age-wise Rate Heatmap"
+        color_continuous_scale='Blues',
+        labels=dict(color="Cheapest Insurer")
+    )
+
+    fig_heatmap.update_layout(
+        height=500,
+        xaxis_title="",
+        yaxis_title="Age",
+        coloraxis_showscale=False
+    )
+
+    fig_heatmap.update_traces(
+        text=None
     )
 
     st.plotly_chart(
         fig_heatmap,
         use_container_width=True
     )
+
+    st.markdown("""
+### Interpretation
+
+- Each row represents an age.
+- The highlighted insurer is the cheapest for that age.
+- More coverage across ages means stronger pricing competitiveness.
+""")
 
     # ---------------------------------------------------
     # INSURER RECOMMENDATION ENGINE
