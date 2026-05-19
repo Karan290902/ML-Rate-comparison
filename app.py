@@ -64,19 +64,34 @@ if mode == "Insurer Comparison":
 
             coa_inputs[insurer_name] = coa
 
-            # Read file
+            # ---------------------------------------------------
+            # READ FILE
+            # ---------------------------------------------------
+
             if uploaded_file.name.endswith(".csv"):
                 df = pd.read_csv(uploaded_file)
             else:
                 df = pd.read_excel(uploaded_file)
 
-            # Convert columns to numeric if possible
-            df.columns = [
-                pd.to_numeric(col, errors='ignore')
-                for col in df.columns
-            ]
+            # ---------------------------------------------------
+            # FIX TENURE COLUMNS
+            # ---------------------------------------------------
 
-            # Convert wide to long
+            new_cols = []
+
+            for col in df.columns:
+
+                try:
+                    new_cols.append(int(col))
+                except:
+                    new_cols.append(col)
+
+            df.columns = new_cols
+
+            # ---------------------------------------------------
+            # CONVERT WIDE TO LONG
+            # ---------------------------------------------------
+
             df_long = df.melt(
                 id_vars=['Entry Age'],
                 var_name='Tenure',
@@ -90,11 +105,18 @@ if mode == "Insurer Comparison":
                 inplace=True
             )
 
-            # Add insurer info
+            # ---------------------------------------------------
+            # ADD INSURER INFO
+            # ---------------------------------------------------
+
             df_long['Insurer'] = insurer_name
+
             df_long['COA'] = coa
 
-            # Clean
+            # ---------------------------------------------------
+            # CLEAN DATA
+            # ---------------------------------------------------
+
             df_long['Age'] = pd.to_numeric(
                 df_long['Age'],
                 errors='coerce'
@@ -465,17 +487,33 @@ elif mode == "Bulk Premium Calculator":
 
                 insurer_name = insurer_file.name.split(".")[0]
 
-                # Read insurer file
+                # ---------------------------------------------------
+                # READ RATE FILE
+                # ---------------------------------------------------
+
                 if insurer_file.name.endswith(".csv"):
                     rate_df = pd.read_csv(insurer_file)
                 else:
                     rate_df = pd.read_excel(insurer_file)
 
-                # Convert columns properly
-                rate_df.columns = [
-                    pd.to_numeric(col, errors='ignore')
-                    for col in rate_df.columns
-                ]
+                # ---------------------------------------------------
+                # FIX TENURE COLUMNS
+                # ---------------------------------------------------
+
+                new_cols = []
+
+                for col in rate_df.columns:
+
+                    try:
+                        new_cols.append(int(col))
+                    except:
+                        new_cols.append(col)
+
+                rate_df.columns = new_cols
+
+                # ---------------------------------------------------
+                # CLEAN ENTRY AGE
+                # ---------------------------------------------------
 
                 rate_df['Entry Age'] = pd.to_numeric(
                     rate_df['Entry Age'],
@@ -486,7 +524,7 @@ elif mode == "Bulk Premium Calculator":
                 statuses = []
 
                 # ---------------------------------------------------
-                # MATCH AGE + TENURE + CALCULATE PREMIUM
+                # CALCULATE PREMIUMS
                 # ---------------------------------------------------
 
                 for _, row in lot_df.iterrows():
@@ -500,13 +538,11 @@ elif mode == "Bulk Premium Calculator":
 
                     try:
 
-                        # Check age exists
                         if age not in rate_df['Entry Age'].values:
 
                             premium = None
                             status = "Age Missing"
 
-                        # Check tenure exists
                         elif tenure not in rate_df.columns:
 
                             premium = None
@@ -531,7 +567,10 @@ elif mode == "Bulk Premium Calculator":
                     premiums.append(premium)
                     statuses.append(status)
 
-                # Add premium column
+                # ---------------------------------------------------
+                # ADD PREMIUMS
+                # ---------------------------------------------------
+
                 result_df[
                     f'{insurer_name} Premium'
                 ] = premiums
@@ -540,7 +579,10 @@ elif mode == "Bulk Premium Calculator":
                     f'{insurer_name} Status'
                 ] = statuses
 
-                # Portfolio summary
+                # ---------------------------------------------------
+                # SUMMARY
+                # ---------------------------------------------------
+
                 total_premium = pd.Series(
                     premiums
                 ).sum()
@@ -609,7 +651,7 @@ elif mode == "Bulk Premium Calculator":
             )
 
             # ---------------------------------------------------
-            # EXPORT REPORT
+            # EXPORT
             # ---------------------------------------------------
 
             output = BytesIO()
