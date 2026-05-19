@@ -25,7 +25,7 @@ Expected Excel Format:
 
 Where:
 - Entry Age = Age
-- Columns 1,2,3... = Tenure
+- Columns = Tenure
 - Values = Rate Per Lakh
 """)
 
@@ -70,7 +70,7 @@ if uploaded_files:
 
             continue
 
-        # Convert matrix to long format
+        # Convert to long format
         df_long = df.melt(
             id_vars=['Entry Age'],
             var_name='Tenure',
@@ -88,7 +88,7 @@ if uploaded_files:
         # Add insurer
         df_long['Insurer'] = insurer_name
 
-        # Convert numeric
+        # Numeric conversion
         df_long['Age'] = pd.to_numeric(
             df_long['Age'],
             errors='coerce'
@@ -104,14 +104,14 @@ if uploaded_files:
             errors='coerce'
         )
 
-        # Remove nulls
+        # Drop nulls
         df_long.dropna(inplace=True)
 
         # Append
         all_data.append(df_long)
 
     # ---------------------------------------------------
-    # FINAL DATA
+    # MERGE ALL DATA
     # ---------------------------------------------------
 
     if all_data:
@@ -122,10 +122,10 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # FILTERS
+        # SIDEBAR FILTERS
         # ---------------------------------------------------
 
-        st.sidebar.header("Comparison Filters")
+        st.sidebar.header("Filters")
 
         selected_age = st.sidebar.selectbox(
             "Select Age",
@@ -138,7 +138,7 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # FILTER DATA
+        # FILTERED DATA
         # ---------------------------------------------------
 
         filtered_df = final_df[
@@ -151,18 +151,12 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # SHOW COMPARISON
+        # BEST INSURER
         # ---------------------------------------------------
 
         st.subheader(
-            f"Comparison for Age {selected_age} | Tenure {selected_tenure}"
+            f"Best Insurer for Age {selected_age} | Tenure {selected_tenure}"
         )
-
-        st.dataframe(filtered_df)
-
-        # ---------------------------------------------------
-        # BEST INSURER
-        # ---------------------------------------------------
 
         if not filtered_df.empty:
 
@@ -170,16 +164,30 @@ if uploaded_files:
 
             st.success(
                 f"""
-                Best Insurer for Age {selected_age}
-                and Tenure {selected_tenure}
-
-                Insurer:
+                Best Insurer:
                 {best['Insurer']}
 
                 Rate Per Lakh:
                 {best['Rate_Per_Lakh']}
                 """
             )
+
+        # ---------------------------------------------------
+        # SIDE-BY-SIDE COMPARISON
+        # ---------------------------------------------------
+
+        st.subheader("Detailed Side-by-Side Comparison")
+
+        comparison_table = final_df.pivot_table(
+            index=['Age', 'Tenure'],
+            columns='Insurer',
+            values='Rate_Per_Lakh'
+        ).reset_index()
+
+        st.dataframe(
+            comparison_table,
+            use_container_width=True
+        )
 
         # ---------------------------------------------------
         # OVERALL BEST INSURER
@@ -200,7 +208,6 @@ if uploaded_files:
 
         st.success(
             f"""
-            Insurer:
             {best_overall['Insurer']}
 
             Average Rate Per Lakh:
@@ -230,21 +237,27 @@ if uploaded_files:
             ]
         )
 
-        st.dataframe(best_age)
-
-        # ---------------------------------------------------
-        # OPTIONAL DETAILED VIEW
-        # ---------------------------------------------------
-
-        show_details = st.checkbox(
-            "Show Detailed Comparison Data"
+        st.dataframe(
+            best_age,
+            use_container_width=True
         )
 
-        if show_details:
+        # ---------------------------------------------------
+        # OPTIONAL DETAILED DATA
+        # ---------------------------------------------------
 
-            st.subheader("Detailed Comparison Data")
+        show_raw = st.checkbox(
+            "Show Raw Processed Data"
+        )
 
-            st.dataframe(final_df)
+        if show_raw:
+
+            st.subheader("Raw Processed Data")
+
+            st.dataframe(
+                final_df,
+                use_container_width=True
+            )
 
 else:
 
