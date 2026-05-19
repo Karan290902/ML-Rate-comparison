@@ -54,7 +54,7 @@ if uploaded_files:
 
         insurer_name = uploaded_file.name.split(".")[0]
 
-        # Optional COA
+        # COA Input
         coa = st.sidebar.text_input(
             f"{insurer_name} COA %",
             value=""
@@ -65,7 +65,7 @@ if uploaded_files:
         except:
             coa = 0
 
-        # Read file
+        # Read File
         if uploaded_file.name.endswith(".csv"):
             df = pd.read_csv(uploaded_file)
         else:
@@ -80,14 +80,16 @@ if uploaded_files:
 
             continue
 
-        # Convert to long format
+        # ---------------------------------------------------
+        # CONVERT TO LONG FORMAT
+        # ---------------------------------------------------
+
         df_long = df.melt(
             id_vars=['Entry Age'],
             var_name='Tenure',
             value_name='Rate_Per_Lakh'
         )
 
-        # Rename
         df_long.rename(
             columns={
                 'Entry Age': 'Age'
@@ -95,13 +97,14 @@ if uploaded_files:
             inplace=True
         )
 
-        # Add insurer
         df_long['Insurer'] = insurer_name
 
-        # Add COA
         df_long['COA'] = coa
 
-        # Numeric conversion
+        # ---------------------------------------------------
+        # CLEAN DATA
+        # ---------------------------------------------------
+
         df_long['Age'] = pd.to_numeric(
             df_long['Age'],
             errors='coerce'
@@ -117,7 +120,6 @@ if uploaded_files:
             errors='coerce'
         )
 
-        # Drop missing
         df_long.dropna(inplace=True)
 
         all_data.append(df_long)
@@ -177,7 +179,7 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # FILTER DATA
+        # FILTERED DATA
         # ---------------------------------------------------
 
         filtered_df = final_df[
@@ -220,22 +222,44 @@ if uploaded_files:
             )
 
         # ---------------------------------------------------
-        # SIDE-BY-SIDE COMPARISON
+        # SIDE-BY-SIDE MATRIX
         # ---------------------------------------------------
 
-        st.subheader("Detailed Comparison")
+        st.subheader("Side-by-Side Rate Comparison")
 
-        comparison = filtered_df[
-            [
-                'Insurer',
-                'Rate_Per_Lakh',
-                'COA',
-                'Commercial_Score'
-            ]
-        ]
+        comparison_matrix = final_df.pivot_table(
+            index=['Age', 'Tenure'],
+            columns='Insurer',
+            values='Rate_Per_Lakh'
+        ).reset_index()
+
+        insurer_cols = comparison_matrix.columns[2:]
+
+        if len(insurer_cols) >= 2:
+
+            base = insurer_cols[0]
+
+            for insurer in insurer_cols[1:]:
+
+                comparison_matrix[
+                    f'{insurer} Difference %'
+                ] = (
+                    (
+                        comparison_matrix[insurer] -
+                        comparison_matrix[base]
+                    )
+                    /
+                    comparison_matrix[base]
+                ) * 100
+
+                comparison_matrix[
+                    f'{insurer} Difference %'
+                ] = comparison_matrix[
+                    f'{insurer} Difference %'
+                ].round(2)
 
         st.dataframe(
-            comparison,
+            comparison_matrix,
             use_container_width=True
         )
 
@@ -273,34 +297,76 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # SIDE BY SIDE MATRIX
+        # AGE SLAB ANALYSIS
         # ---------------------------------------------------
 
-        st.subheader("Side-by-Side Rate Matrix")
+        st.subheader("Best Insurer by Age Slab")
 
-        matrix = final_df.pivot_table(
-            index=['Age', 'Tenure'],
-            columns='Insurer',
-            values='Rate_Per_Lakh'
-        ).reset_index()
+        bins = [18, 25, 35, 45, 55, 100]
+
+        labels = [
+            '18-25',
+            '26-35',
+            '36-45',
+            '46-55',
+            '56+'
+        ]
+
+        final_df['Age_Slab'] = pd.cut(
+            final_df['Age'],
+            bins=bins,
+            labels=labels,
+            right=True
+        )
+
+        slab_analysis = (
+            final_df.groupby(
+                ['Age_Slab', 'Insurer']
+            )['Commercial_Score']
+            .mean()
+            .reset_index()
+        )
+
+        best_slab = (
+            slab_analysis.loc[
+                slab_analysis.groupby('Age_Slab')[
+                    'Commercial_Score'
+                ].idxmax()
+            ]
+        )
 
         st.dataframe(
-            matrix,
+            best_slab,
             use_container_width=True
         )
 
         # ---------------------------------------------------
-        # AGE TREND
+        # AGE VS RATE GRAPH
         # ---------------------------------------------------
 
-        st.subheader("Age vs Rate Trend")
+        st.subheader("Age vs Rate Comparison")
+
+        selected_chart_tenure = st.selectbox(
+            "Select Tenure for Age Comparison",
+            sorted(final_df['Tenure'].unique()),
+            key='age_chart'
+        )
+
+        chart_df = final_df[
+            final_df['Tenure'] == selected_chart_tenure
+        ]
 
         fig_age = px.line(
-            final_df,
+            chart_df,
             x='Age',
             y='Rate_Per_Lakh',
             color='Insurer',
-            markers=True
+            markers=True,
+            title=f'Age vs Rate | Tenure {selected_chart_tenure}'
+        )
+
+        fig_age.update_layout(
+            height=500
         )
 
         st.plotly_chart(
@@ -309,17 +375,32 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # TENURE TREND
+        # TENURE VS RATE GRAPH
         # ---------------------------------------------------
 
-        st.subheader("Tenure vs Rate Trend")
+        st.subheader("Tenure vs Rate Comparison")
+
+        selected_chart_age = st.selectbox(
+            "Select Age for Tenure Comparison",
+            sorted(final_df['Age'].unique()),
+            key='tenure_chart'
+        )
+
+        tenure_chart_df = final_df[
+            final_df['Age'] == selected_chart_age
+        ]
 
         fig_tenure = px.line(
-            final_df,
+            tenure_chart_df,
             x='Tenure',
             y='Rate_Per_Lakh',
             color='Insurer',
-            markers=True
+            markers=True,
+            title=f'Tenure vs Rate | Age {selected_chart_age}'
+        )
+
+        fig_tenure.update_layout(
+            height=500
         )
 
         st.plotly_chart(
