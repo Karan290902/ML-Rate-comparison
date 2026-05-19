@@ -422,62 +422,6 @@ Reason:
     )
 
     # ---------------------------------------------------
-    # SIMPLE HEATMAP
-    # ---------------------------------------------------
-
-    st.subheader("Cheapest Insurer Heatmap")
-
-    heatmap_df = (
-        final_df.loc[
-            final_df.groupby(
-                ['Age']
-            )['Rate_Per_Lakh'].idxmin()
-        ][['Age', 'Insurer']]
-    )
-
-    heatmap_df['Value'] = (
-        heatmap_df['Insurer']
-        .astype('category')
-        .cat.codes
-    )
-
-    heatmap_pivot = heatmap_df.pivot_table(
-        index='Age',
-        values='Value'
-    )
-
-    fig_heatmap = px.imshow(
-        heatmap_pivot,
-        aspect='auto',
-        color_continuous_scale='Blues',
-        labels=dict(color="Cheapest Insurer")
-    )
-
-    fig_heatmap.update_layout(
-        height=500,
-        xaxis_title="",
-        yaxis_title="Age",
-        coloraxis_showscale=False
-    )
-
-    fig_heatmap.update_traces(
-        text=None
-    )
-
-    st.plotly_chart(
-        fig_heatmap,
-        use_container_width=True
-    )
-
-    st.markdown("""
-### Interpretation
-
-- Each row represents an age.
-- The highlighted insurer is the cheapest for that age.
-- More coverage across ages means stronger pricing competitiveness.
-""")
-
-    # ---------------------------------------------------
     # INSURER RECOMMENDATION ENGINE
     # ---------------------------------------------------
 
