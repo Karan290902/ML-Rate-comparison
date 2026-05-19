@@ -7,7 +7,7 @@ import numpy as np
 # ---------------------------------------------------
 
 st.set_page_config(
-    page_title="Insurance Insurer Comparison Engine",
+    page_title="Insurance Insurer Comparison",
     layout="wide"
 )
 
@@ -18,13 +18,11 @@ st.set_page_config(
 st.title("Insurance Insurer Comparison Dashboard")
 
 st.write("""
-This dashboard helps compare insurers based on:
-
+Compare insurers based on:
 - Rate Per Lakh
 - COA %
 - Age
 - Tenure
-- Overall business attractiveness
 """)
 
 # ---------------------------------------------------
@@ -32,12 +30,12 @@ This dashboard helps compare insurers based on:
 # ---------------------------------------------------
 
 uploaded_file = st.file_uploader(
-    "Upload Insurer Comparison Excel/CSV",
+    "Upload Comparison Excel File",
     type=["xlsx", "csv"]
 )
 
 # ---------------------------------------------------
-# MAIN LOGIC
+# MAIN
 # ---------------------------------------------------
 
 if uploaded_file:
@@ -64,44 +62,35 @@ if uploaded_file:
         'COA'
     ]
 
-    # Check columns
+    # ---------------------------------------------------
+    # CHECK COLUMNS
+    # ---------------------------------------------------
+
     if all(col in df.columns for col in required_cols):
 
-        # ---------------------------------------------------
-        # DATA CLEANING
-        # ---------------------------------------------------
+        # Convert numeric
+        df['Age'] = pd.to_numeric(df['Age'])
+
+        df['Tenure'] = pd.to_numeric(df['Tenure'])
 
         df['Rate_Per_Lakh'] = pd.to_numeric(
-            df['Rate_Per_Lakh'],
-            errors='coerce'
+            df['Rate_Per_Lakh']
         )
 
-        df['COA'] = pd.to_numeric(
-            df['COA'],
-            errors='coerce'
-        )
-
-        df['Age'] = pd.to_numeric(
-            df['Age'],
-            errors='coerce'
-        )
-
-        df['Tenure'] = pd.to_numeric(
-            df['Tenure'],
-            errors='coerce'
-        )
-
-        # Remove missing values
-        df = df.dropna()
+        df['COA'] = pd.to_numeric(df['COA'])
 
         # ---------------------------------------------------
-        # BUSINESS SCORING LOGIC
+        # SCORING LOGIC
         # ---------------------------------------------------
 
         # Lower Rate = Better
         df['Rate_Score'] = (
-            (1 / df['Rate_Per_Lakh']) /
-            (1 / df['Rate_Per_Lakh']).max()
+            (
+                1 / df['Rate_Per_Lakh']
+            ) /
+            (
+                1 / df['Rate_Per_Lakh']
+            ).max()
         ) * 100
 
         # Higher COA = Better
@@ -110,48 +99,34 @@ if uploaded_file:
             df['COA'].max()
         ) * 100
 
-        # Stability score
-        # Lower variance across age/tenure preferred
+        # Stability
         df['Stability_Score'] = 100 - (
             (
-                df['Rate_Per_Lakh'] -
-                df['Rate_Per_Lakh'].mean()
-            ).abs()
-            /
+                abs(
+                    df['Rate_Per_Lakh'] -
+                    df['Rate_Per_Lakh'].mean()
+                )
+            ) /
             df['Rate_Per_Lakh'].max()
         ) * 100
 
-        # Final weighted score
+        # Final Score
         df['Final_Score'] = (
-            df['Rate_Score'] * 0.50 +
-            df['COA_Score'] * 0.30 +
-            df['Stability_Score'] * 0.20
+            df['Rate_Score'] * 0.60 +
+            df['COA_Score'] * 0.25 +
+            df['Stability_Score'] * 0.15
         )
 
         # ---------------------------------------------------
         # SHOW SCORES
         # ---------------------------------------------------
 
-        st.subheader("Calculated Insurer Scores")
+        st.subheader("Calculated Scores")
 
-        st.dataframe(
-            df[
-                [
-                    'Insurer',
-                    'Age',
-                    'Tenure',
-                    'Rate_Per_Lakh',
-                    'COA',
-                    'Rate_Score',
-                    'COA_Score',
-                    'Stability_Score',
-                    'Final_Score'
-                ]
-            ]
-        )
+        st.dataframe(df)
 
         # ---------------------------------------------------
-        # INSURER RANKING
+        # OVERALL RANKING
         # ---------------------------------------------------
 
         ranking = (
@@ -168,26 +143,21 @@ if uploaded_file:
 
         st.dataframe(ranking)
 
-        # Best insurer
+        # ---------------------------------------------------
+        # BEST INSURER
+        # ---------------------------------------------------
+
         best_insurer = ranking.iloc[0]['Insurer']
 
-        best_score = ranking.iloc[0]['Final_Score']
-
         st.success(
-            f"""
-            Best Overall Insurer:
-            {best_insurer}
-
-            Average Business Score:
-            {best_score:.2f}
-            """
+            f"Best Overall Insurer: {best_insurer}"
         )
 
         # ---------------------------------------------------
         # FILTERS
         # ---------------------------------------------------
 
-        st.sidebar.header("Filters")
+        st.sidebar.header("Comparison Filters")
 
         selected_age = st.sidebar.selectbox(
             "Select Age",
@@ -199,7 +169,10 @@ if uploaded_file:
             sorted(df['Tenure'].unique())
         )
 
-        # Filtered Data
+        # ---------------------------------------------------
+        # FILTER DATA
+        # ---------------------------------------------------
+
         filtered_df = df[
             (df['Age'] == selected_age) &
             (df['Tenure'] == selected_tenure)
@@ -224,7 +197,7 @@ if uploaded_file:
 
             st.info(
                 f"""
-                Best insurer for selected criteria:
+                Best Insurer:
 
                 {best_filtered['Insurer']}
 
@@ -237,46 +210,84 @@ if uploaded_file:
             )
 
         # ---------------------------------------------------
-        # BUSINESS INSIGHTS
+        # LOWEST RATE INSURER
+        # ---------------------------------------------------
+
+        lowest_rate = filtered_df.sort_values(
+            by='Rate_Per_Lakh'
+        ).iloc[0]
+
+        st.subheader("Lowest Rate Insurer")
+
+        st.write(
+            f"""
+            Insurer:
+            {lowest_rate['Insurer']}
+
+            Rate:
+            {lowest_rate['Rate_Per_Lakh']}
+            """
+        )
+
+        # ---------------------------------------------------
+        # HIGHEST COA INSURER
+        # ---------------------------------------------------
+
+        highest_coa = filtered_df.sort_values(
+            by='COA',
+            ascending=False
+        ).iloc[0]
+
+        st.subheader("Highest COA Insurer")
+
+        st.write(
+            f"""
+            Insurer:
+            {highest_coa['Insurer']}
+
+            COA:
+            {highest_coa['COA']}%
+            """
+        )
+
+        # ---------------------------------------------------
+        # BUSINESS INTERPRETATION
         # ---------------------------------------------------
 
         st.subheader("Business Interpretation")
 
         st.write("""
-        ### How Final Score is Calculated
+        ### Lower Rate Per Lakh
+        Better for:
+        - customer conversion
+        - scalability
+        - affinity business
 
-        - Lower Rate Per Lakh = Better customer pricing
-        - Higher COA = Better broker economics
-        - Stable pricing across age & tenure = Better scalability
+        ### Higher COA
+        Better for:
+        - broker revenue
+        - acquisition economics
 
-        ### Best Insurer Usually Means:
-
-        - Competitive pricing
-        - Sustainable COA
-        - Better age-term stability
-        - Better business scalability
-
-        ### Use Cases
-
-        - Group Insurance
-        - Affinity Business
-        - Embedded Insurance
-        - PA / CI / GCL / GTL Comparison
+        ### Best Insurer
+        Usually means:
+        - competitive pricing
+        - reasonable COA
+        - stable pricing across age & tenure
         """)
 
     else:
 
-        st.error(f"""
-        Missing Required Columns.
+        st.error(
+            f"""
+            Missing Required Columns.
 
-        Required Columns:
-        {required_cols}
-        """)
-
-# ---------------------------------------------------
-# NO FILE
-# ---------------------------------------------------
+            Required:
+            {required_cols}
+            """
+        )
 
 else:
 
-    st.warning("Please upload an Excel or CSV file.")
+    st.warning(
+        "Please upload Excel or CSV file."
+    )
