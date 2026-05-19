@@ -48,7 +48,7 @@ if uploaded_files:
     all_data = []
 
     # ---------------------------------------------------
-    # PROCESS EACH FILE
+    # PROCESS FILES
     # ---------------------------------------------------
 
     for uploaded_file in uploaded_files:
@@ -61,10 +61,7 @@ if uploaded_files:
         else:
             df = pd.read_excel(uploaded_file)
 
-        # ---------------------------------------------------
-        # VALIDATION
-        # ---------------------------------------------------
-
+        # Validate
         if 'Entry Age' not in df.columns:
 
             st.error(
@@ -73,17 +70,14 @@ if uploaded_files:
 
             continue
 
-        # ---------------------------------------------------
-        # CONVERT MATRIX TO LONG FORMAT
-        # ---------------------------------------------------
-
+        # Convert matrix to long format
         df_long = df.melt(
             id_vars=['Entry Age'],
             var_name='Tenure',
             value_name='Rate_Per_Lakh'
         )
 
-        # Rename column
+        # Rename
         df_long.rename(
             columns={
                 'Entry Age': 'Age'
@@ -91,13 +85,10 @@ if uploaded_files:
             inplace=True
         )
 
-        # Add insurer name
+        # Add insurer
         df_long['Insurer'] = insurer_name
 
-        # ---------------------------------------------------
-        # CLEAN DATA
-        # ---------------------------------------------------
-
+        # Convert numeric
         df_long['Age'] = pd.to_numeric(
             df_long['Age'],
             errors='coerce'
@@ -113,16 +104,14 @@ if uploaded_files:
             errors='coerce'
         )
 
+        # Remove nulls
         df_long.dropna(inplace=True)
 
-        # ---------------------------------------------------
-        # APPEND
-        # ---------------------------------------------------
-
+        # Append
         all_data.append(df_long)
 
     # ---------------------------------------------------
-    # MERGE ALL INSURERS
+    # FINAL DATA
     # ---------------------------------------------------
 
     if all_data:
@@ -133,58 +122,7 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # SCORING
-        # ---------------------------------------------------
-
-        # Lower Rate = Better
-        final_df['Rate_Score'] = (
-            (
-                1 / final_df['Rate_Per_Lakh']
-            ) /
-            (
-                1 / final_df['Rate_Per_Lakh']
-            ).max()
-        ) * 100
-
-        # Final score
-        final_df['Final_Score'] = (
-            final_df['Rate_Score']
-        )
-
-        # ---------------------------------------------------
-        # SHOW DATA
-        # ---------------------------------------------------
-
-        st.subheader("Combined Comparison Data")
-
-        st.dataframe(final_df)
-
-        # ---------------------------------------------------
-        # OVERALL INSURER RANKING
-        # ---------------------------------------------------
-
-        ranking = (
-            final_df.groupby('Insurer')['Final_Score']
-            .mean()
-            .reset_index()
-            .sort_values(
-                by='Final_Score',
-                ascending=False
-            )
-        )
-
-        st.subheader("Overall Insurer Ranking")
-
-        st.dataframe(ranking)
-
-        best_overall = ranking.iloc[0]['Insurer']
-
-        st.success(
-            f"Best Overall Insurer: {best_overall}"
-        )
-
-        # ---------------------------------------------------
-        # SIDEBAR FILTERS
+        # FILTERS
         # ---------------------------------------------------
 
         st.sidebar.header("Comparison Filters")
@@ -208,18 +146,22 @@ if uploaded_files:
             (final_df['Tenure'] == selected_tenure)
         ]
 
-        st.subheader(
-            f"Comparison for Age {selected_age} | Tenure {selected_tenure}"
-        )
-
         filtered_df = filtered_df.sort_values(
             by='Rate_Per_Lakh'
+        )
+
+        # ---------------------------------------------------
+        # SHOW COMPARISON
+        # ---------------------------------------------------
+
+        st.subheader(
+            f"Comparison for Age {selected_age} | Tenure {selected_tenure}"
         )
 
         st.dataframe(filtered_df)
 
         # ---------------------------------------------------
-        # BEST INSURER FOR FILTER
+        # BEST INSURER
         # ---------------------------------------------------
 
         if not filtered_df.empty:
@@ -240,48 +182,69 @@ if uploaded_files:
             )
 
         # ---------------------------------------------------
-        # LOWEST RATE TABLE
+        # OVERALL BEST INSURER
         # ---------------------------------------------------
 
-        st.subheader("Lowest Rate Summary")
-
-        lowest_summary = (
-            final_df.loc[
-                final_df.groupby(
-                    ['Age', 'Tenure']
-                )['Rate_Per_Lakh'].idxmin()
-            ]
+        overall_best = (
+            final_df.groupby('Insurer')['Rate_Per_Lakh']
+            .mean()
+            .reset_index()
+            .sort_values(
+                by='Rate_Per_Lakh'
+            )
         )
 
-        st.dataframe(
-            lowest_summary[
-                [
-                    'Age',
-                    'Tenure',
-                    'Insurer',
+        best_overall = overall_best.iloc[0]
+
+        st.subheader("Overall Best Insurer")
+
+        st.success(
+            f"""
+            Insurer:
+            {best_overall['Insurer']}
+
+            Average Rate Per Lakh:
+            {round(best_overall['Rate_Per_Lakh'], 2)}
+            """
+        )
+
+        # ---------------------------------------------------
+        # BEST INSURER BY AGE SLAB
+        # ---------------------------------------------------
+
+        st.subheader("Best Insurer by Age Slab")
+
+        age_summary = (
+            final_df.groupby(
+                ['Age', 'Insurer']
+            )['Rate_Per_Lakh']
+            .mean()
+            .reset_index()
+        )
+
+        best_age = (
+            age_summary.loc[
+                age_summary.groupby('Age')[
                     'Rate_Per_Lakh'
-                ]
+                ].idxmin()
             ]
         )
 
+        st.dataframe(best_age)
+
         # ---------------------------------------------------
-        # BUSINESS INTERPRETATION
+        # OPTIONAL DETAILED VIEW
         # ---------------------------------------------------
 
-        st.subheader("Business Interpretation")
+        show_details = st.checkbox(
+            "Show Detailed Comparison Data"
+        )
 
-        st.write("""
-        ### Lower Rate Per Lakh Means:
-        - Better customer pricing
-        - Better conversion
-        - Better scalability
-        - Stronger affinity business proposition
+        if show_details:
 
-        ### Best Insurer Usually:
-        - Has lower pricing across most ages
-        - Has smoother pricing across tenures
-        - Does not sharply increase rates at higher ages
-        """)
+            st.subheader("Detailed Comparison Data")
+
+            st.dataframe(final_df)
 
 else:
 
