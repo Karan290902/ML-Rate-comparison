@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 from io import BytesIO
 
 # ---------------------------------------------------
@@ -7,11 +8,11 @@ from io import BytesIO
 # ---------------------------------------------------
 
 st.set_page_config(
-    page_title="Insurance Premium Engine",
+    page_title="Insurance Commercial Dashboard",
     layout="wide"
 )
 
-st.title("Insurance Premium Engine")
+st.title("Insurance Commercial Dashboard")
 
 # ---------------------------------------------------
 # MODE SELECTION
@@ -31,7 +32,7 @@ mode = st.sidebar.radio(
 
 if mode == "Insurer Comparison":
 
-    st.header("Insurer Comparison")
+    st.header("Insurer Comparison Dashboard")
 
     uploaded_files = st.file_uploader(
         "Upload Insurer Rate Cards",
@@ -42,13 +43,12 @@ if mode == "Insurer Comparison":
     if uploaded_files:
 
         all_data = []
-
         coa_inputs = {}
 
         st.sidebar.header("COA Inputs")
 
         # ---------------------------------------------------
-        # PROCESS FILES
+        # PROCESS INSURER FILES
         # ---------------------------------------------------
 
         for uploaded_file in uploaded_files:
@@ -58,7 +58,8 @@ if mode == "Insurer Comparison":
             coa = st.sidebar.number_input(
                 f"{insurer_name} COA %",
                 min_value=0.0,
-                value=0.0
+                value=0.0,
+                step=1.0
             )
 
             coa_inputs[insurer_name] = coa
@@ -69,7 +70,7 @@ if mode == "Insurer Comparison":
             else:
                 df = pd.read_excel(uploaded_file)
 
-            # Convert
+            # Convert wide to long
             df_long = df.melt(
                 id_vars=['Entry Age'],
                 var_name='Tenure',
@@ -83,8 +84,8 @@ if mode == "Insurer Comparison":
                 inplace=True
             )
 
+            # Add insurer info
             df_long['Insurer'] = insurer_name
-
             df_long['COA'] = coa
 
             # Clean
@@ -107,18 +108,45 @@ if mode == "Insurer Comparison":
 
             all_data.append(df_long)
 
+        # ---------------------------------------------------
+        # FINAL DATAFRAME
+        # ---------------------------------------------------
+
         final_df = pd.concat(
             all_data,
             ignore_index=True
         )
 
         # ---------------------------------------------------
-        # SUMMARY
+        # FILTERS
         # ---------------------------------------------------
 
-        st.subheader("Overall Insurer Summary")
+        st.sidebar.header("Filters")
 
-        summary = (
+        selected_age = st.sidebar.selectbox(
+            "Select Age",
+            sorted(final_df['Age'].unique())
+        )
+
+        selected_tenure = st.sidebar.selectbox(
+            "Select Tenure",
+            sorted(final_df['Tenure'].unique())
+        )
+
+        filtered_df = final_df[
+            (final_df['Age'] == selected_age) &
+            (final_df['Tenure'] == selected_tenure)
+        ]
+
+        filtered_df = filtered_df.sort_values(
+            by='Rate_Per_Lakh'
+        )
+
+        # ---------------------------------------------------
+        # SUMMARY CARDS
+        # ---------------------------------------------------
+
+        overall_rates = (
             final_df.groupby('Insurer')[
                 'Rate_Per_Lakh'
             ]
@@ -126,12 +154,125 @@ if mode == "Insurer Comparison":
             .reset_index()
         )
 
-        summary['COA'] = summary['Insurer'].map(
-            coa_inputs
+        overall_rates['COA'] = overall_rates[
+            'Insurer'
+        ].map(coa_inputs)
+
+        cheapest_overall = overall_rates.loc[
+            overall_rates['Rate_Per_Lakh'].idxmin()
+        ]
+
+        highest_coa = overall_rates.loc[
+            overall_rates['COA'].idxmax()
+        ]
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric(
+            "Cheapest Overall",
+            cheapest_overall['Insurer']
         )
 
+        col2.metric(
+            "Highest COA",
+            highest_coa['Insurer']
+        )
+
+        col3.metric(
+            "Lowest Avg Rate",
+            round(
+                cheapest_overall['Rate_Per_Lakh'],
+                2
+            )
+        )
+
+        # ---------------------------------------------------
+        # BEST PRICING
+        # ---------------------------------------------------
+
+        st.subheader(
+            f"Best Pricing | Age {selected_age} | Tenure {selected_tenure}"
+        )
+
+        if not filtered_df.empty:
+
+            best_price = filtered_df.iloc[0]
+
+            col1, col2, col3 = st.columns(3)
+
+            col1.metric(
+                "Lowest Price Insurer",
+                best_price['Insurer']
+            )
+
+            col2.metric(
+                "Rate Per Lakh",
+                round(best_price['Rate_Per_Lakh'], 2)
+            )
+
+            col3.metric(
+                "COA %",
+                best_price['COA']
+            )
+
+        # ---------------------------------------------------
+        # PREMIUM CALCULATOR
+        # ---------------------------------------------------
+
+        st.subheader("Premium Calculator")
+
+        loan_amount = st.number_input(
+            "Enter Loan Amount",
+            min_value=10000,
+            value=500000,
+            step=10000
+        )
+
+        include_gst = st.checkbox(
+            "Include GST @18%",
+            value=True
+        )
+
+        premium_df = filtered_df.copy()
+
+        premium_df['Premium'] = (
+            loan_amount / 100000
+        ) * premium_df['Rate_Per_Lakh']
+
+        if include_gst:
+
+            premium_df['GST'] = (
+                premium_df['Premium'] * 0.18
+            )
+
+            premium_df['Final Premium'] = (
+                premium_df['Premium'] +
+                premium_df['GST']
+            )
+
+        else:
+
+            premium_df['GST'] = 0
+
+            premium_df['Final Premium'] = (
+                premium_df['Premium']
+            )
+
+        premium_df = premium_df[
+            [
+                'Insurer',
+                'Rate_Per_Lakh',
+                'Premium',
+                'GST',
+                'Final Premium',
+                'COA'
+            ]
+        ]
+
+        premium_df = premium_df.round(2)
+
         st.dataframe(
-            summary,
+            premium_df,
             use_container_width=True
         )
 
@@ -176,6 +317,78 @@ if mode == "Insurer Comparison":
             use_container_width=True
         )
 
+        # ---------------------------------------------------
+        # AGE-WISE WINNER TABLE
+        # ---------------------------------------------------
+
+        st.subheader("Age-wise Winner Table")
+
+        bins = [18, 25, 35, 45, 55, 100]
+
+        labels = [
+            '18-25',
+            '26-35',
+            '36-45',
+            '46-55',
+            '56+'
+        ]
+
+        final_df['Age_Slab'] = pd.cut(
+            final_df['Age'],
+            bins=bins,
+            labels=labels,
+            right=True
+        )
+
+        slab = (
+            final_df.groupby(
+                ['Age_Slab', 'Insurer']
+            )['Rate_Per_Lakh']
+            .mean()
+            .reset_index()
+        )
+
+        best_slab = (
+            slab.loc[
+                slab.groupby('Age_Slab')[
+                    'Rate_Per_Lakh'
+                ].idxmin()
+            ]
+        )
+
+        st.dataframe(
+            best_slab,
+            use_container_width=True
+        )
+
+        # ---------------------------------------------------
+        # AGE VS RATE GRAPH
+        # ---------------------------------------------------
+
+        st.subheader("Age vs Rate Comparison")
+
+        chart_tenure = st.selectbox(
+            "Select Tenure for Chart",
+            sorted(final_df['Tenure'].unique())
+        )
+
+        chart_df = final_df[
+            final_df['Tenure'] == chart_tenure
+        ]
+
+        fig_age = px.line(
+            chart_df,
+            x='Age',
+            y='Rate_Per_Lakh',
+            color='Insurer',
+            markers=True
+        )
+
+        st.plotly_chart(
+            fig_age,
+            use_container_width=True
+        )
+
 # ===================================================
 # MODE 2 : BULK PREMIUM CALCULATOR
 # ===================================================
@@ -194,7 +407,7 @@ elif mode == "Bulk Premium Calculator":
     )
 
     # ---------------------------------------------------
-    # RATE CARDS
+    # INSURER RATE FILES
     # ---------------------------------------------------
 
     insurer_files = st.file_uploader(
@@ -229,18 +442,18 @@ elif mode == "Bulk Premium Calculator":
         if missing:
 
             st.error(
-                f"Missing columns in lot file: {missing}"
+                f"Missing columns: {missing}"
             )
 
         else:
 
-            # ---------------------------------------------------
-            # PROCESS INSURERS
-            # ---------------------------------------------------
-
             result_df = lot_df.copy()
 
             summary_data = []
+
+            # ---------------------------------------------------
+            # PROCESS EACH INSURER
+            # ---------------------------------------------------
 
             for insurer_file in insurer_files:
 
@@ -252,14 +465,17 @@ elif mode == "Bulk Premium Calculator":
                 else:
                     rate_df = pd.read_excel(insurer_file)
 
-                # Convert age column
                 rate_df['Entry Age'] = pd.to_numeric(
                     rate_df['Entry Age'],
                     errors='coerce'
                 )
 
-                # Premium list
                 premiums = []
+                statuses = []
+
+                # ---------------------------------------------------
+                # MATCH AGE + TENURE + CALCULATE PREMIUM
+                # ---------------------------------------------------
 
                 for _, row in lot_df.iterrows():
 
@@ -268,28 +484,49 @@ elif mode == "Bulk Premium Calculator":
                     loan_amount = row['Loan Amount']
 
                     premium = None
+                    status = "Success"
 
                     try:
 
-                        rate = rate_df.loc[
-                            rate_df['Entry Age'] == age,
-                            str(tenure)
-                        ].values[0]
+                        # Check age exists
+                        if age not in rate_df['Entry Age'].values:
 
-                        premium = (
-                            loan_amount / 100000
-                        ) * rate
+                            premium = None
+                            status = "Age Missing"
+
+                        # Check tenure exists
+                        elif str(tenure) not in rate_df.columns:
+
+                            premium = None
+                            status = "Tenure Missing"
+
+                        else:
+
+                            rate = rate_df.loc[
+                                rate_df['Entry Age'] == age,
+                                str(tenure)
+                            ].values[0]
+
+                            premium = (
+                                loan_amount / 100000
+                            ) * rate
 
                     except:
 
                         premium = None
+                        status = "Calculation Error"
 
                     premiums.append(premium)
+                    statuses.append(status)
 
-                # Add insurer premium
+                # Add premium column
                 result_df[
                     f'{insurer_name} Premium'
                 ] = premiums
+
+                result_df[
+                    f'{insurer_name} Status'
+                ] = statuses
 
                 # Portfolio summary
                 total_premium = pd.Series(
@@ -313,12 +550,23 @@ elif mode == "Bulk Premium Calculator":
                 if 'Premium' in col
             ]
 
+            def get_cheapest_insurer(row):
+
+                valid_values = row.dropna()
+
+                if len(valid_values) == 0:
+                    return "No Matching Rate"
+
+                return (
+                    valid_values.idxmin()
+                    .replace(' Premium', '')
+                )
+
             result_df['Cheapest Insurer'] = (
                 result_df[premium_cols]
-                .idxmin(axis=1)
-                .str.replace(
-                    ' Premium',
-                    ''
+                .apply(
+                    get_cheapest_insurer,
+                    axis=1
                 )
             )
 
@@ -326,7 +574,7 @@ elif mode == "Bulk Premium Calculator":
             # OUTPUT
             # ---------------------------------------------------
 
-            st.subheader("Premium Calculation Output")
+            st.subheader("Premium Output")
 
             st.dataframe(
                 result_df,
@@ -349,7 +597,7 @@ elif mode == "Bulk Premium Calculator":
             )
 
             # ---------------------------------------------------
-            # EXPORT
+            # EXPORT REPORT
             # ---------------------------------------------------
 
             output = BytesIO()
@@ -374,6 +622,6 @@ elif mode == "Bulk Premium Calculator":
             st.download_button(
                 label="Download Premium Report",
                 data=output.getvalue(),
-                file_name="premium_calculation_output.xlsx",
+                file_name="premium_output.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
