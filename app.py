@@ -21,8 +21,8 @@ st.markdown("""
 Compare insurers based on:
 - Rate Per Lakh
 - COA %
-- Age-wise pricing
-- Tenure-wise pricing
+- Age-wise competitiveness
+- Tenure-wise competitiveness
 - Commercial attractiveness
 """)
 
@@ -54,7 +54,10 @@ if uploaded_files:
 
         insurer_name = uploaded_file.name.split(".")[0]
 
-        # COA Input
+        # ---------------------------------------------------
+        # COA INPUT
+        # ---------------------------------------------------
+
         coa = st.sidebar.text_input(
             f"{insurer_name} COA %",
             value=""
@@ -65,13 +68,19 @@ if uploaded_files:
         except:
             coa = 0
 
-        # Read File
+        # ---------------------------------------------------
+        # READ FILE
+        # ---------------------------------------------------
+
         if uploaded_file.name.endswith(".csv"):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
 
-        # Validate
+        # ---------------------------------------------------
+        # VALIDATION
+        # ---------------------------------------------------
+
         if 'Entry Age' not in df.columns:
 
             st.error(
@@ -81,7 +90,7 @@ if uploaded_files:
             continue
 
         # ---------------------------------------------------
-        # CONVERT TO LONG FORMAT
+        # CONVERT MATRIX TO LONG FORMAT
         # ---------------------------------------------------
 
         df_long = df.melt(
@@ -96,6 +105,10 @@ if uploaded_files:
             },
             inplace=True
         )
+
+        # ---------------------------------------------------
+        # ADD INSURER + COA
+        # ---------------------------------------------------
 
         df_long['Insurer'] = insurer_name
 
@@ -125,7 +138,7 @@ if uploaded_files:
         all_data.append(df_long)
 
     # ---------------------------------------------------
-    # FINAL DATA
+    # FINAL DATAFRAME
     # ---------------------------------------------------
 
     if len(all_data) > 0:
@@ -136,9 +149,10 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # SCORING
+        # SCORING LOGIC
         # ---------------------------------------------------
 
+        # Lower rate = better
         final_df['Rate_Score'] = (
             (
                 1 / final_df['Rate_Per_Lakh']
@@ -148,6 +162,7 @@ if uploaded_files:
             ).max()
         ) * 100
 
+        # Higher COA = better
         max_coa = max(
             final_df['COA'].max(),
             1
@@ -157,13 +172,14 @@ if uploaded_files:
             final_df['COA'] / max_coa
         ) * 100
 
+        # Commercial Score
         final_df['Commercial_Score'] = (
             final_df['Rate_Score'] * 0.7 +
             final_df['COA_Score'] * 0.3
         )
 
         # ---------------------------------------------------
-        # FILTERS
+        # SIDEBAR FILTERS
         # ---------------------------------------------------
 
         st.sidebar.header("Filters")
@@ -179,7 +195,7 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # FILTERED DATA
+        # FILTER DATA
         # ---------------------------------------------------
 
         filtered_df = final_df[
@@ -193,7 +209,7 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # BEST INSURER
+        # BEST INSURER OUTPUT
         # ---------------------------------------------------
 
         st.subheader(
@@ -222,7 +238,7 @@ if uploaded_files:
             )
 
         # ---------------------------------------------------
-        # SIDE-BY-SIDE MATRIX
+        # SIDE-BY-SIDE COMPARISON
         # ---------------------------------------------------
 
         st.subheader("Side-by-Side Rate Comparison")
@@ -234,6 +250,10 @@ if uploaded_files:
         ).reset_index()
 
         insurer_cols = comparison_matrix.columns[2:]
+
+        # ---------------------------------------------------
+        # DIFFERENCE %
+        # ---------------------------------------------------
 
         if len(insurer_cols) >= 2:
 
@@ -341,6 +361,96 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
+        # WHY THIS INSURER IS BEST
+        # ---------------------------------------------------
+
+        st.subheader("Why This Insurer is Best")
+
+        lowest_rate_insurer = (
+            final_df.groupby('Insurer')[
+                'Rate_Per_Lakh'
+            ]
+            .mean()
+            .idxmin()
+        )
+
+        highest_coa_insurer = (
+            final_df.groupby('Insurer')[
+                'COA'
+            ]
+            .mean()
+            .idxmax()
+        )
+
+        best_age_slab = (
+            best_slab[
+                best_slab['Insurer'] ==
+                overall_best['Insurer']
+            ]['Age_Slab']
+        )
+
+        if len(best_age_slab) > 0:
+
+            best_age_slab = ", ".join(
+                best_age_slab.astype(str)
+            )
+
+        else:
+
+            best_age_slab = "All Segments"
+
+        rate_std = (
+            final_df.groupby('Insurer')[
+                'Rate_Per_Lakh'
+            ]
+            .std()
+        )
+
+        most_stable = rate_std.idxmin()
+
+        reason_text = f"""
+        ### Best Commercial Insurer:
+        {overall_best['Insurer']}
+
+        ### Why?
+
+        - Strong balance between pricing and COA
+        - Competitive pricing across multiple tenures
+        - Better commercial attractiveness
+        - Strongest in age slab(s):
+          {best_age_slab}
+
+        ### Additional Insights
+
+        - Lowest overall pricing:
+          {lowest_rate_insurer}
+
+        - Highest COA opportunity:
+          {highest_coa_insurer}
+
+        - Most stable pricing:
+          {most_stable}
+
+        ### Commercial Score Logic
+
+        Commercial Score =
+        (70% Pricing Competitiveness)
+        +
+        (30% COA Attractiveness)
+
+        Lower rates improve:
+        - customer conversion
+        - scalability
+        - competitiveness
+
+        Higher COA improves:
+        - broker economics
+        - acquisition revenue
+        """
+
+        st.info(reason_text)
+
+        # ---------------------------------------------------
         # AGE VS RATE GRAPH
         # ---------------------------------------------------
 
@@ -414,29 +524,13 @@ if uploaded_files:
 
         st.subheader("Business Insights")
 
-        lowest_rate = (
-            final_df.groupby('Insurer')[
-                'Rate_Per_Lakh'
-            ]
-            .mean()
-            .idxmin()
-        )
-
-        highest_coa = (
-            final_df.groupby('Insurer')[
-                'COA'
-            ]
-            .mean()
-            .idxmax()
-        )
-
         st.info(
             f"""
             Lowest Pricing Overall:
-            {lowest_rate}
+            {lowest_rate_insurer}
 
             Highest COA Opportunity:
-            {highest_coa}
+            {highest_coa_insurer}
 
             Best Commercial Insurer:
             {overall_best['Insurer']}
