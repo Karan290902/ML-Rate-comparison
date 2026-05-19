@@ -70,6 +70,12 @@ if mode == "Insurer Comparison":
             else:
                 df = pd.read_excel(uploaded_file)
 
+            # Convert columns to numeric if possible
+            df.columns = [
+                pd.to_numeric(col, errors='ignore')
+                for col in df.columns
+            ]
+
             # Convert wide to long
             df_long = df.melt(
                 id_vars=['Entry Age'],
@@ -465,6 +471,12 @@ elif mode == "Bulk Premium Calculator":
                 else:
                     rate_df = pd.read_excel(insurer_file)
 
+                # Convert columns properly
+                rate_df.columns = [
+                    pd.to_numeric(col, errors='ignore')
+                    for col in rate_df.columns
+                ]
+
                 rate_df['Entry Age'] = pd.to_numeric(
                     rate_df['Entry Age'],
                     errors='coerce'
@@ -495,7 +507,7 @@ elif mode == "Bulk Premium Calculator":
                             status = "Age Missing"
 
                         # Check tenure exists
-                        elif str(tenure) not in rate_df.columns:
+                        elif tenure not in rate_df.columns:
 
                             premium = None
                             status = "Tenure Missing"
@@ -504,7 +516,7 @@ elif mode == "Bulk Premium Calculator":
 
                             rate = rate_df.loc[
                                 rate_df['Entry Age'] == age,
-                                str(tenure)
+                                tenure
                             ].values[0]
 
                             premium = (
