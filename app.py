@@ -25,6 +25,7 @@ Compare insurers based on:
 - Age-wise comparison
 - Tenure-wise comparison
 - Commercial suitability
+- Premium calculation
 """)
 
 # ---------------------------------------------------
@@ -269,6 +270,67 @@ if uploaded_files:
         )
 
     # ---------------------------------------------------
+    # PREMIUM CALCULATOR
+    # ---------------------------------------------------
+
+    st.subheader("Premium Calculator")
+
+    loan_amount = st.number_input(
+        "Enter Loan Amount",
+        min_value=10000,
+        value=500000,
+        step=10000
+    )
+
+    include_gst = st.checkbox(
+        "Include GST @18%",
+        value=True
+    )
+
+    premium_df = filtered_df.copy()
+
+    premium_df['Premium'] = (
+        loan_amount / 100000
+    ) * premium_df['Rate_Per_Lakh']
+
+    if include_gst:
+
+        premium_df['GST'] = (
+            premium_df['Premium'] * 0.18
+        )
+
+        premium_df['Final Premium'] = (
+            premium_df['Premium'] +
+            premium_df['GST']
+        )
+
+    else:
+
+        premium_df['GST'] = 0
+
+        premium_df['Final Premium'] = (
+            premium_df['Premium']
+        )
+
+    premium_df = premium_df[
+        [
+            'Insurer',
+            'Rate_Per_Lakh',
+            'Premium',
+            'GST',
+            'Final Premium',
+            'COA'
+        ]
+    ]
+
+    premium_df = premium_df.round(2)
+
+    st.dataframe(
+        premium_df,
+        use_container_width=True
+    )
+
+    # ---------------------------------------------------
     # SIDE-BY-SIDE COMPARISON
     # ---------------------------------------------------
 
@@ -419,10 +481,6 @@ if uploaded_files:
         .round(2)
     )
 
-    # ---------------------------------------------------
-    # LOGIC
-    # ---------------------------------------------------
-
     balanced_candidates = value_df[
         value_df['Price_Difference_%'] <= 10
     ]
@@ -440,10 +498,6 @@ if uploaded_files:
             value_df['Rate_Per_Lakh'].idxmin()
         ]
 
-    # ---------------------------------------------------
-    # REASON
-    # ---------------------------------------------------
-
     reason = ""
 
     if best_balanced['Price_Difference_%'] <= 5:
@@ -456,16 +510,15 @@ Strong overall commercial proposition.
     elif best_balanced['Price_Difference_%'] <= 10:
 
         reason = """
-Slight pricing increase is justified
+Slight pricing increase justified
 by better COA economics.
-Balanced commercial proposition.
 """
 
     else:
 
         reason = """
-Lowest pricing dominates commercial decision.
-Higher COA insurers not sufficiently justified.
+Pricing increase not justified by COA.
+Lower pricing insurer preferable.
 """
 
     st.success(
@@ -660,6 +713,12 @@ Recommendation:
             writer,
             index=False,
             sheet_name='Balanced Analysis'
+        )
+
+        premium_df.to_excel(
+            writer,
+            index=False,
+            sheet_name='Premium Calculation'
         )
 
     st.download_button(
