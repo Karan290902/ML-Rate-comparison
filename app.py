@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from io import BytesIO
 
 # ---------------------------------------------------
 # PAGE CONFIG
 # ---------------------------------------------------
 
 st.set_page_config(
-    page_title="Insurance Commercial Comparison Dashboard",
+    page_title="Insurance Commercial Dashboard",
     layout="wide"
 )
 
@@ -21,9 +22,9 @@ st.markdown("""
 Compare insurers based on:
 - Pricing competitiveness
 - COA attractiveness
-- Age-wise pricing
-- Tenure-wise pricing
-- Business suitability
+- Age-wise comparison
+- Tenure-wise comparison
+- Commercial suitability
 """)
 
 # ---------------------------------------------------
@@ -56,10 +57,6 @@ if uploaded_files:
 
         insurer_name = uploaded_file.name.split(".")[0]
 
-        # ---------------------------------------------------
-        # COA INPUT
-        # ---------------------------------------------------
-
         coa = st.sidebar.text_input(
             f"{insurer_name} COA %",
             value=""
@@ -72,19 +69,13 @@ if uploaded_files:
 
         coa_inputs[insurer_name] = coa
 
-        # ---------------------------------------------------
-        # READ FILE
-        # ---------------------------------------------------
-
+        # Read File
         if uploaded_file.name.endswith(".csv"):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
 
-        # ---------------------------------------------------
-        # VALIDATION
-        # ---------------------------------------------------
-
+        # Validation
         if 'Entry Age' not in df.columns:
 
             st.error(
@@ -93,10 +84,7 @@ if uploaded_files:
 
             continue
 
-        # ---------------------------------------------------
-        # CONVERT TO LONG FORMAT
-        # ---------------------------------------------------
-
+        # Convert to long format
         df_long = df.melt(
             id_vars=['Entry Age'],
             var_name='Tenure',
@@ -110,18 +98,12 @@ if uploaded_files:
             inplace=True
         )
 
-        # ---------------------------------------------------
-        # ADD INSURER
-        # ---------------------------------------------------
-
+        # Add insurer
         df_long['Insurer'] = insurer_name
 
         df_long['COA'] = coa
 
-        # ---------------------------------------------------
-        # CLEAN DATA
-        # ---------------------------------------------------
-
+        # Clean data
         df_long['Age'] = pd.to_numeric(
             df_long['Age'],
             errors='coerce'
@@ -142,382 +124,486 @@ if uploaded_files:
         all_data.append(df_long)
 
     # ---------------------------------------------------
-    # FINAL DATAFRAME
+    # FINAL DATA
     # ---------------------------------------------------
 
-    if len(all_data) > 0:
+    final_df = pd.concat(
+        all_data,
+        ignore_index=True
+    )
 
-        final_df = pd.concat(
-            all_data,
-            ignore_index=True
-        )
+    # ---------------------------------------------------
+    # FILTERS
+    # ---------------------------------------------------
 
-        # ---------------------------------------------------
-        # FILTERS
-        # ---------------------------------------------------
+    st.sidebar.header("Filters")
 
-        st.sidebar.header("Filters")
+    selected_age = st.sidebar.selectbox(
+        "Select Age",
+        sorted(final_df['Age'].unique())
+    )
 
-        selected_age = st.sidebar.selectbox(
-            "Select Age",
-            sorted(final_df['Age'].unique())
-        )
+    selected_tenure = st.sidebar.selectbox(
+        "Select Tenure",
+        sorted(final_df['Tenure'].unique())
+    )
 
-        selected_tenure = st.sidebar.selectbox(
-            "Select Tenure",
-            sorted(final_df['Tenure'].unique())
-        )
+    # ---------------------------------------------------
+    # FILTER DATA
+    # ---------------------------------------------------
 
-        # ---------------------------------------------------
-        # FILTER DATA
-        # ---------------------------------------------------
+    filtered_df = final_df[
+        (final_df['Age'] == selected_age) &
+        (final_df['Tenure'] == selected_tenure)
+    ]
 
-        filtered_df = final_df[
-            (final_df['Age'] == selected_age) &
-            (final_df['Tenure'] == selected_tenure)
+    filtered_df = filtered_df.sort_values(
+        by='Rate_Per_Lakh'
+    )
+
+    # ---------------------------------------------------
+    # SUMMARY CARDS
+    # ---------------------------------------------------
+
+    overall_rates = (
+        final_df.groupby('Insurer')[
+            'Rate_Per_Lakh'
         ]
+        .mean()
+        .reset_index()
+    )
 
-        filtered_df = filtered_df.sort_values(
-            by='Rate_Per_Lakh'
+    cheapest_overall = overall_rates.loc[
+        overall_rates['Rate_Per_Lakh'].idxmin()
+    ]
+
+    highest_coa = max(
+        coa_inputs,
+        key=coa_inputs.get
+    )
+
+    stability = (
+        final_df.groupby('Insurer')[
+            'Rate_Per_Lakh'
+        ]
+        .std()
+    )
+
+    most_stable = stability.idxmin()
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric(
+        "Cheapest Overall",
+        cheapest_overall['Insurer']
+    )
+
+    col2.metric(
+        "Highest COA",
+        highest_coa
+    )
+
+    col3.metric(
+        "Most Stable Pricing",
+        most_stable
+    )
+
+    col4.metric(
+        "Best Scale Insurer",
+        cheapest_overall['Insurer']
+    )
+
+    # ---------------------------------------------------
+    # BEST PRICING OUTPUT
+    # ---------------------------------------------------
+
+    st.subheader(
+        f"Best Pricing | Age {selected_age} | Tenure {selected_tenure}"
+    )
+
+    if not filtered_df.empty:
+
+        best_price = filtered_df.iloc[0]
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric(
+            "Lowest Price Insurer",
+            best_price['Insurer']
         )
 
-        # ---------------------------------------------------
-        # BEST PRICING INSURER
-        # ---------------------------------------------------
-
-        st.subheader(
-            f"Best Pricing | Age {selected_age} | Tenure {selected_tenure}"
+        col2.metric(
+            "Rate Per Lakh",
+            round(best_price['Rate_Per_Lakh'], 2)
         )
 
-        if not filtered_df.empty:
+        col3.metric(
+            "COA %",
+            best_price['COA']
+        )
 
-            best_price = filtered_df.iloc[0]
+    # ---------------------------------------------------
+    # SIDE-BY-SIDE MATRIX
+    # ---------------------------------------------------
 
-            col1, col2, col3 = st.columns(3)
+    st.subheader("Side-by-Side Rate Comparison")
 
-            col1.metric(
-                "Lowest Price Insurer",
-                best_price['Insurer']
-            )
+    comparison_matrix = final_df.pivot_table(
+        index=['Age', 'Tenure'],
+        columns='Insurer',
+        values='Rate_Per_Lakh'
+    ).reset_index()
 
-            col2.metric(
-                "Rate Per Lakh",
-                round(best_price['Rate_Per_Lakh'], 2)
-            )
+    insurer_cols = comparison_matrix.columns[2:]
 
-            col3.metric(
-                "COA %",
-                best_price['COA']
-            )
+    if len(insurer_cols) >= 2:
 
-        # ---------------------------------------------------
-        # SIDE-BY-SIDE COMPARISON
-        # ---------------------------------------------------
+        base = insurer_cols[0]
 
-        st.subheader("Side-by-Side Rate Comparison")
+        for insurer in insurer_cols[1:]:
 
-        comparison_matrix = final_df.pivot_table(
-            index=['Age', 'Tenure'],
-            columns='Insurer',
-            values='Rate_Per_Lakh'
-        ).reset_index()
-
-        insurer_cols = comparison_matrix.columns[2:]
-
-        # ---------------------------------------------------
-        # DIFFERENCE %
-        # ---------------------------------------------------
-
-        if len(insurer_cols) >= 2:
-
-            base = insurer_cols[0]
-
-            for insurer in insurer_cols[1:]:
-
-                comparison_matrix[
-                    f'{insurer} Difference %'
-                ] = (
-                    (
-                        comparison_matrix[insurer] -
-                        comparison_matrix[base]
-                    )
-                    /
+            comparison_matrix[
+                f'{insurer} Difference %'
+            ] = (
+                (
+                    comparison_matrix[insurer] -
                     comparison_matrix[base]
-                ) * 100
+                )
+                /
+                comparison_matrix[base]
+            ) * 100
 
-                comparison_matrix[
-                    f'{insurer} Difference %'
-                ] = comparison_matrix[
-                    f'{insurer} Difference %'
-                ].round(2)
+            comparison_matrix[
+                f'{insurer} Difference %'
+            ] = comparison_matrix[
+                f'{insurer} Difference %'
+            ].round(2)
 
-        st.dataframe(
-            comparison_matrix,
-            use_container_width=True
-        )
+    st.dataframe(
+        comparison_matrix,
+        use_container_width=True
+    )
 
-        # ---------------------------------------------------
-        # OVERALL ANALYSIS
-        # ---------------------------------------------------
+    # ---------------------------------------------------
+    # CHEAPEST INSURER FREQUENCY
+    # ---------------------------------------------------
 
-        st.subheader("Overall Insurer Analysis")
+    st.subheader("Cheapest Insurer Frequency")
 
-        overall = (
-            final_df.groupby('Insurer')[
+    cheapest_cases = (
+        final_df.loc[
+            final_df.groupby(
+                ['Age', 'Tenure']
+            )['Rate_Per_Lakh'].idxmin()
+        ]
+    )
+
+    frequency = (
+        cheapest_cases['Insurer']
+        .value_counts()
+        .reset_index()
+    )
+
+    frequency.columns = [
+        'Insurer',
+        'Cheapest Cases'
+    ]
+
+    frequency['Cheapest %'] = (
+        frequency['Cheapest Cases']
+        /
+        frequency['Cheapest Cases'].sum()
+    ) * 100
+
+    frequency['Cheapest %'] = (
+        frequency['Cheapest %']
+        .round(2)
+    )
+
+    st.dataframe(
+        frequency,
+        use_container_width=True
+    )
+
+    # ---------------------------------------------------
+    # AGE-WISE WINNER TABLE
+    # ---------------------------------------------------
+
+    st.subheader("Age-wise Winner Table")
+
+    bins = [18, 25, 35, 45, 55, 100]
+
+    labels = [
+        '18-25',
+        '26-35',
+        '36-45',
+        '46-55',
+        '56+'
+    ]
+
+    final_df['Age_Slab'] = pd.cut(
+        final_df['Age'],
+        bins=bins,
+        labels=labels,
+        right=True
+    )
+
+    slab = (
+        final_df.groupby(
+            ['Age_Slab', 'Insurer']
+        )['Rate_Per_Lakh']
+        .mean()
+        .reset_index()
+    )
+
+    best_slab = (
+        slab.loc[
+            slab.groupby('Age_Slab')[
                 'Rate_Per_Lakh'
-            ]
-            .mean()
-            .reset_index()
-        )
+            ].idxmin()
+        ]
+    )
 
-        overall['COA'] = overall['Insurer'].map(
-            coa_inputs
-        )
+    st.dataframe(
+        best_slab,
+        use_container_width=True
+    )
 
-        overall = overall.sort_values(
-            by='Rate_Per_Lakh'
-        )
+    # ---------------------------------------------------
+    # BEST VALUE INSURER
+    # ---------------------------------------------------
 
-        st.dataframe(
-            overall,
-            use_container_width=True
-        )
+    st.subheader("Best Value Insurer")
 
-        # ---------------------------------------------------
-        # BEST PRICING INSURER
-        # ---------------------------------------------------
+    value_df = overall_rates.copy()
 
-        best_pricing = overall.iloc[0]
+    value_df['COA'] = value_df['Insurer'].map(
+        coa_inputs
+    )
 
-        # ---------------------------------------------------
-        # BEST COA INSURER
-        # ---------------------------------------------------
+    value_df['Value_Index'] = (
+        value_df['COA'] /
+        value_df['Rate_Per_Lakh']
+    )
 
-        best_coa = overall.sort_values(
-            by='COA',
-            ascending=False
-        ).iloc[0]
+    best_value = value_df.loc[
+        value_df['Value_Index'].idxmax()
+    ]
 
-        # ---------------------------------------------------
-        # BUSINESS INTERPRETATION
-        # ---------------------------------------------------
+    st.success(
+        f"""
+Best Value Insurer:
+{best_value['Insurer']}
 
-        st.subheader("Business Interpretation")
+Reason:
+- Strong balance between pricing and COA
+- Better commercial attractiveness
+"""
+    )
 
-        interpretation = ""
+    # ---------------------------------------------------
+    # HEATMAP
+    # ---------------------------------------------------
 
-        for _, row in overall.iterrows():
+    st.subheader("Heatmap Dashboard")
 
-            insurer = row['Insurer']
-            rate = row['Rate_Per_Lakh']
-            coa = row['COA']
+    heatmap_data = final_df.pivot_table(
+        index='Age',
+        columns='Insurer',
+        values='Rate_Per_Lakh'
+    )
 
-            pricing_strength = ""
+    fig_heatmap = px.imshow(
+        heatmap_data,
+        text_auto=True,
+        aspect='auto',
+        title="Age-wise Rate Heatmap"
+    )
 
-            if rate <= overall['Rate_Per_Lakh'].quantile(0.25):
-                pricing_strength = "Excellent Pricing"
+    st.plotly_chart(
+        fig_heatmap,
+        use_container_width=True
+    )
 
-            elif rate <= overall['Rate_Per_Lakh'].median():
-                pricing_strength = "Good Pricing"
+    # ---------------------------------------------------
+    # INSURER RECOMMENDATION ENGINE
+    # ---------------------------------------------------
 
-            else:
-                pricing_strength = "Higher Pricing"
+    st.subheader("Insurer Recommendation Engine")
 
-            coa_strength = ""
+    recommendations = ""
 
-            if coa >= overall['COA'].quantile(0.75):
-                coa_strength = "Strong COA"
+    for _, row in value_df.iterrows():
 
-            elif coa >= overall['COA'].median():
-                coa_strength = "Moderate COA"
+        insurer = row['Insurer']
+        rate = row['Rate_Per_Lakh']
+        coa = row['COA']
 
-            else:
-                coa_strength = "Lower COA"
+        pricing_view = ""
 
-            recommendation = ""
+        if rate <= value_df['Rate_Per_Lakh'].quantile(0.25):
+            pricing_view = "Excellent Pricing"
 
-            if pricing_strength == "Excellent Pricing" and coa_strength == "Strong COA":
-                recommendation = "Excellent Commercial Proposition"
+        elif rate <= value_df['Rate_Per_Lakh'].median():
+            pricing_view = "Good Pricing"
 
-            elif pricing_strength == "Excellent Pricing":
-                recommendation = "Best for Scale Business"
+        else:
+            pricing_view = "Higher Pricing"
 
-            elif coa_strength == "Strong COA":
-                recommendation = "Best for Higher Revenue"
+        coa_view = ""
 
-            else:
-                recommendation = "Balanced Proposition"
+        if coa >= value_df['COA'].quantile(0.75):
+            coa_view = "Strong COA"
 
-            interpretation += f"""
+        elif coa >= value_df['COA'].median():
+            coa_view = "Moderate COA"
+
+        else:
+            coa_view = "Lower COA"
+
+        recommendation = ""
+
+        if pricing_view == "Excellent Pricing" and coa_view == "Strong COA":
+            recommendation = "Excellent Commercial Proposition"
+
+        elif pricing_view == "Excellent Pricing":
+            recommendation = "Best for Scale Business"
+
+        elif coa_view == "Strong COA":
+            recommendation = "Best for Revenue Focus"
+
+        else:
+            recommendation = "Balanced Proposition"
+
+        recommendations += f"""
 ### {insurer}
 
-- Avg Rate Per Lakh: {round(rate,2)}
-- COA: {coa}%
+Pricing:
+- {pricing_view}
 
-Pricing View:
-- {pricing_strength}
-
-COA View:
-- {coa_strength}
+COA:
+- {coa_view}
 
 Recommendation:
 - {recommendation}
 
 """
 
-        st.markdown(interpretation)
+    st.markdown(recommendations)
 
-        # ---------------------------------------------------
-        # FINAL RECOMMENDATION
-        # ---------------------------------------------------
+    # ---------------------------------------------------
+    # AGE VS RATE GRAPH
+    # ---------------------------------------------------
 
-        st.subheader("Final Recommendation")
+    st.subheader("Age vs Rate Comparison")
 
-        final_text = f"""
-### Best Pricing Insurer
-{best_pricing['Insurer']}
+    selected_chart_tenure = st.selectbox(
+        "Select Tenure",
+        sorted(final_df['Tenure'].unique())
+    )
 
-Reason:
-- Lowest overall pricing
-- Better conversion potential
-- Better scalability
+    chart_df = final_df[
+        final_df['Tenure'] == selected_chart_tenure
+    ]
 
-### Best COA Insurer
-{best_coa['Insurer']}
+    fig_age = px.line(
+        chart_df,
+        x='Age',
+        y='Rate_Per_Lakh',
+        color='Insurer',
+        markers=True,
+        title=f'Age vs Rate | Tenure {selected_chart_tenure}'
+    )
 
-Reason:
-- Higher acquisition economics
-- Better broker revenue opportunity
+    st.plotly_chart(
+        fig_age,
+        use_container_width=True
+    )
 
-### Suggested Decision Logic
+    # ---------------------------------------------------
+    # TENURE VS RATE GRAPH
+    # ---------------------------------------------------
 
-- If focus is scale and customer acquisition:
-  Prefer lower pricing insurer.
+    st.subheader("Tenure vs Rate Comparison")
 
-- If focus is higher margins/revenue:
-  Prefer stronger COA insurer.
+    selected_chart_age = st.selectbox(
+        "Select Age",
+        sorted(final_df['Age'].unique()),
+        key='tenure_chart'
+    )
 
-- Best insurer practically is the one where:
-  pricing difference is manageable
-  AND
-  COA advantage is commercially meaningful.
-"""
+    tenure_chart_df = final_df[
+        final_df['Age'] == selected_chart_age
+    ]
 
-        st.info(final_text)
+    fig_tenure = px.line(
+        tenure_chart_df,
+        x='Tenure',
+        y='Rate_Per_Lakh',
+        color='Insurer',
+        markers=True,
+        title=f'Tenure vs Rate | Age {selected_chart_age}'
+    )
 
-        # ---------------------------------------------------
-        # AGE SLAB ANALYSIS
-        # ---------------------------------------------------
+    st.plotly_chart(
+        fig_tenure,
+        use_container_width=True
+    )
 
-        st.subheader("Best Pricing by Age Slab")
+    # ---------------------------------------------------
+    # EXPORT REPORT
+    # ---------------------------------------------------
 
-        bins = [18, 25, 35, 45, 55, 100]
+    st.subheader("Export Report")
 
-        labels = [
-            '18-25',
-            '26-35',
-            '36-45',
-            '46-55',
-            '56+'
-        ]
+    output = BytesIO()
 
-        final_df['Age_Slab'] = pd.cut(
-            final_df['Age'],
-            bins=bins,
-            labels=labels,
-            right=True
+    with pd.ExcelWriter(
+        output,
+        engine='openpyxl'
+    ) as writer:
+
+        comparison_matrix.to_excel(
+            writer,
+            index=False,
+            sheet_name='Comparison'
         )
 
-        slab = (
-            final_df.groupby(
-                ['Age_Slab', 'Insurer']
-            )['Rate_Per_Lakh']
-            .mean()
-            .reset_index()
+        frequency.to_excel(
+            writer,
+            index=False,
+            sheet_name='Cheapest Frequency'
         )
 
-        best_slab = (
-            slab.loc[
-                slab.groupby('Age_Slab')[
-                    'Rate_Per_Lakh'
-                ].idxmin()
-            ]
+        best_slab.to_excel(
+            writer,
+            index=False,
+            sheet_name='Age Winners'
         )
+
+        value_df.to_excel(
+            writer,
+            index=False,
+            sheet_name='Value Analysis'
+        )
+
+    st.download_button(
+        label="Download Excel Report",
+        data=output.getvalue(),
+        file_name="insurance_comparison_report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    # ---------------------------------------------------
+    # RAW DATA
+    # ---------------------------------------------------
+
+    if st.checkbox("Show Raw Data"):
 
         st.dataframe(
-            best_slab,
+            final_df,
             use_container_width=True
         )
-
-        # ---------------------------------------------------
-        # AGE VS RATE GRAPH
-        # ---------------------------------------------------
-
-        st.subheader("Age vs Rate Comparison")
-
-        selected_chart_tenure = st.selectbox(
-            "Select Tenure",
-            sorted(final_df['Tenure'].unique())
-        )
-
-        chart_df = final_df[
-            final_df['Tenure'] == selected_chart_tenure
-        ]
-
-        fig_age = px.line(
-            chart_df,
-            x='Age',
-            y='Rate_Per_Lakh',
-            color='Insurer',
-            markers=True,
-            title=f'Age vs Rate | Tenure {selected_chart_tenure}'
-        )
-
-        st.plotly_chart(
-            fig_age,
-            use_container_width=True
-        )
-
-        # ---------------------------------------------------
-        # TENURE VS RATE GRAPH
-        # ---------------------------------------------------
-
-        st.subheader("Tenure vs Rate Comparison")
-
-        selected_chart_age = st.selectbox(
-            "Select Age",
-            sorted(final_df['Age'].unique()),
-            key='tenure_chart'
-        )
-
-        tenure_chart_df = final_df[
-            final_df['Age'] == selected_chart_age
-        ]
-
-        fig_tenure = px.line(
-            tenure_chart_df,
-            x='Tenure',
-            y='Rate_Per_Lakh',
-            color='Insurer',
-            markers=True,
-            title=f'Tenure vs Rate | Age {selected_chart_age}'
-        )
-
-        st.plotly_chart(
-            fig_tenure,
-            use_container_width=True
-        )
-
-        # ---------------------------------------------------
-        # RAW DATA
-        # ---------------------------------------------------
-
-        if st.checkbox("Show Raw Data"):
-
-            st.dataframe(
-                final_df,
-                use_container_width=True
-            )
 
 else:
 
