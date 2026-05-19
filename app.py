@@ -179,7 +179,7 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # SIDEBAR FILTERS
+        # FILTERS
         # ---------------------------------------------------
 
         st.sidebar.header("Filters")
@@ -209,7 +209,7 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # BEST INSURER OUTPUT
+        # TOP METRICS
         # ---------------------------------------------------
 
         st.subheader(
@@ -409,44 +409,44 @@ if uploaded_files:
         most_stable = rate_std.idxmin()
 
         reason_text = f"""
-        ### Best Commercial Insurer:
-        {overall_best['Insurer']}
+### Best Commercial Insurer:
+{overall_best['Insurer']}
 
-        ### Why?
+### Why?
 
-        - Strong balance between pricing and COA
-        - Competitive pricing across multiple tenures
-        - Better commercial attractiveness
-        - Strongest in age slab(s):
-          {best_age_slab}
+- Strong balance between pricing and COA
+- Competitive pricing across multiple tenures
+- Better commercial attractiveness
+- Strongest in age slab(s):
+  {best_age_slab}
 
-        ### Additional Insights
+### Additional Insights
 
-        - Lowest overall pricing:
-          {lowest_rate_insurer}
+- Lowest overall pricing:
+  {lowest_rate_insurer}
 
-        - Highest COA opportunity:
-          {highest_coa_insurer}
+- Highest COA opportunity:
+  {highest_coa_insurer}
 
-        - Most stable pricing:
-          {most_stable}
+- Most stable pricing:
+  {most_stable}
 
-        ### Commercial Score Logic
+### Commercial Score Logic
 
-        Commercial Score =
-        (70% Pricing Competitiveness)
-        +
-        (30% COA Attractiveness)
+Commercial Score =
+(70% Pricing Competitiveness)
++
+(30% COA Attractiveness)
 
-        Lower rates improve:
-        - customer conversion
-        - scalability
-        - competitiveness
+Lower rates improve:
+- customer conversion
+- scalability
+- competitiveness
 
-        Higher COA improves:
-        - broker economics
-        - acquisition revenue
-        """
+Higher COA improves:
+- broker economics
+- acquisition revenue
+"""
 
         st.info(reason_text)
 
@@ -526,19 +526,19 @@ if uploaded_files:
 
         st.info(
             f"""
-            Lowest Pricing Overall:
-            {lowest_rate_insurer}
+Lowest Pricing Overall:
+{lowest_rate_insurer}
 
-            Highest COA Opportunity:
-            {highest_coa_insurer}
+Highest COA Opportunity:
+{highest_coa_insurer}
 
-            Best Commercial Insurer:
-            {overall_best['Insurer']}
-            """
+Best Commercial Insurer:
+{overall_best['Insurer']}
+"""
         )
 
         # ---------------------------------------------------
-        # OPTIONAL RAW DATA
+        # RAW DATA
         # ---------------------------------------------------
 
         if st.checkbox("Show Raw Data"):
