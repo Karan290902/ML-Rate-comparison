@@ -7,7 +7,7 @@ import plotly.express as px
 # ---------------------------------------------------
 
 st.set_page_config(
-    page_title="Insurance Intelligence Dashboard",
+    page_title="Insurance Commercial Comparison Dashboard",
     layout="wide"
 )
 
@@ -15,15 +15,15 @@ st.set_page_config(
 # TITLE
 # ---------------------------------------------------
 
-st.title("Insurance Insurer Intelligence Dashboard")
+st.title("Insurance Commercial Comparison Dashboard")
 
 st.markdown("""
 Compare insurers based on:
-- Rate Per Lakh
-- COA %
-- Age-wise competitiveness
-- Tenure-wise competitiveness
-- Commercial attractiveness
+- Pricing competitiveness
+- COA attractiveness
+- Age-wise pricing
+- Tenure-wise pricing
+- Business suitability
 """)
 
 # ---------------------------------------------------
@@ -43,6 +43,8 @@ uploaded_files = st.file_uploader(
 if uploaded_files:
 
     all_data = []
+
+    coa_inputs = {}
 
     st.sidebar.header("COA Inputs")
 
@@ -68,6 +70,8 @@ if uploaded_files:
         except:
             coa = 0
 
+        coa_inputs[insurer_name] = coa
+
         # ---------------------------------------------------
         # READ FILE
         # ---------------------------------------------------
@@ -90,7 +94,7 @@ if uploaded_files:
             continue
 
         # ---------------------------------------------------
-        # CONVERT MATRIX TO LONG FORMAT
+        # CONVERT TO LONG FORMAT
         # ---------------------------------------------------
 
         df_long = df.melt(
@@ -107,7 +111,7 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # ADD INSURER + COA
+        # ADD INSURER
         # ---------------------------------------------------
 
         df_long['Insurer'] = insurer_name
@@ -149,36 +153,6 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # SCORING LOGIC
-        # ---------------------------------------------------
-
-        # Lower rate = better
-        final_df['Rate_Score'] = (
-            (
-                1 / final_df['Rate_Per_Lakh']
-            ) /
-            (
-                1 / final_df['Rate_Per_Lakh']
-            ).max()
-        ) * 100
-
-        # Higher COA = better
-        max_coa = max(
-            final_df['COA'].max(),
-            1
-        )
-
-        final_df['COA_Score'] = (
-            final_df['COA'] / max_coa
-        ) * 100
-
-        # Commercial Score
-        final_df['Commercial_Score'] = (
-            final_df['Rate_Score'] * 0.7 +
-            final_df['COA_Score'] * 0.3
-        )
-
-        # ---------------------------------------------------
         # FILTERS
         # ---------------------------------------------------
 
@@ -204,37 +178,36 @@ if uploaded_files:
         ]
 
         filtered_df = filtered_df.sort_values(
-            by='Commercial_Score',
-            ascending=False
+            by='Rate_Per_Lakh'
         )
 
         # ---------------------------------------------------
-        # TOP METRICS
+        # BEST PRICING INSURER
         # ---------------------------------------------------
 
         st.subheader(
-            f"Best Insurer | Age {selected_age} | Tenure {selected_tenure}"
+            f"Best Pricing | Age {selected_age} | Tenure {selected_tenure}"
         )
 
         if not filtered_df.empty:
 
-            best = filtered_df.iloc[0]
+            best_price = filtered_df.iloc[0]
 
             col1, col2, col3 = st.columns(3)
 
             col1.metric(
-                "Best Insurer",
-                best['Insurer']
+                "Lowest Price Insurer",
+                best_price['Insurer']
             )
 
             col2.metric(
                 "Rate Per Lakh",
-                round(best['Rate_Per_Lakh'], 2)
+                round(best_price['Rate_Per_Lakh'], 2)
             )
 
             col3.metric(
-                "Commercial Score",
-                round(best['Commercial_Score'], 2)
+                "COA %",
+                best_price['COA']
             )
 
         # ---------------------------------------------------
@@ -284,43 +257,159 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # OVERALL BEST INSURER
+        # OVERALL ANALYSIS
         # ---------------------------------------------------
 
-        st.subheader("Overall Best Insurer")
+        st.subheader("Overall Insurer Analysis")
 
         overall = (
             final_df.groupby('Insurer')[
-                ['Rate_Per_Lakh', 'Commercial_Score']
+                'Rate_Per_Lakh'
             ]
             .mean()
             .reset_index()
         )
 
+        overall['COA'] = overall['Insurer'].map(
+            coa_inputs
+        )
+
         overall = overall.sort_values(
-            by='Commercial_Score',
+            by='Rate_Per_Lakh'
+        )
+
+        st.dataframe(
+            overall,
+            use_container_width=True
+        )
+
+        # ---------------------------------------------------
+        # BEST PRICING INSURER
+        # ---------------------------------------------------
+
+        best_pricing = overall.iloc[0]
+
+        # ---------------------------------------------------
+        # BEST COA INSURER
+        # ---------------------------------------------------
+
+        best_coa = overall.sort_values(
+            by='COA',
             ascending=False
-        )
+        ).iloc[0]
 
-        overall_best = overall.iloc[0]
+        # ---------------------------------------------------
+        # BUSINESS INTERPRETATION
+        # ---------------------------------------------------
 
-        st.success(
-            f"""
-            {overall_best['Insurer']}
+        st.subheader("Business Interpretation")
 
-            Avg Rate:
-            {round(overall_best['Rate_Per_Lakh'], 2)}
+        interpretation = ""
 
-            Avg Commercial Score:
-            {round(overall_best['Commercial_Score'], 2)}
-            """
-        )
+        for _, row in overall.iterrows():
+
+            insurer = row['Insurer']
+            rate = row['Rate_Per_Lakh']
+            coa = row['COA']
+
+            pricing_strength = ""
+
+            if rate <= overall['Rate_Per_Lakh'].quantile(0.25):
+                pricing_strength = "Excellent Pricing"
+
+            elif rate <= overall['Rate_Per_Lakh'].median():
+                pricing_strength = "Good Pricing"
+
+            else:
+                pricing_strength = "Higher Pricing"
+
+            coa_strength = ""
+
+            if coa >= overall['COA'].quantile(0.75):
+                coa_strength = "Strong COA"
+
+            elif coa >= overall['COA'].median():
+                coa_strength = "Moderate COA"
+
+            else:
+                coa_strength = "Lower COA"
+
+            recommendation = ""
+
+            if pricing_strength == "Excellent Pricing" and coa_strength == "Strong COA":
+                recommendation = "Excellent Commercial Proposition"
+
+            elif pricing_strength == "Excellent Pricing":
+                recommendation = "Best for Scale Business"
+
+            elif coa_strength == "Strong COA":
+                recommendation = "Best for Higher Revenue"
+
+            else:
+                recommendation = "Balanced Proposition"
+
+            interpretation += f"""
+### {insurer}
+
+- Avg Rate Per Lakh: {round(rate,2)}
+- COA: {coa}%
+
+Pricing View:
+- {pricing_strength}
+
+COA View:
+- {coa_strength}
+
+Recommendation:
+- {recommendation}
+
+"""
+
+        st.markdown(interpretation)
+
+        # ---------------------------------------------------
+        # FINAL RECOMMENDATION
+        # ---------------------------------------------------
+
+        st.subheader("Final Recommendation")
+
+        final_text = f"""
+### Best Pricing Insurer
+{best_pricing['Insurer']}
+
+Reason:
+- Lowest overall pricing
+- Better conversion potential
+- Better scalability
+
+### Best COA Insurer
+{best_coa['Insurer']}
+
+Reason:
+- Higher acquisition economics
+- Better broker revenue opportunity
+
+### Suggested Decision Logic
+
+- If focus is scale and customer acquisition:
+  Prefer lower pricing insurer.
+
+- If focus is higher margins/revenue:
+  Prefer stronger COA insurer.
+
+- Best insurer practically is the one where:
+  pricing difference is manageable
+  AND
+  COA advantage is commercially meaningful.
+"""
+
+        st.info(final_text)
 
         # ---------------------------------------------------
         # AGE SLAB ANALYSIS
         # ---------------------------------------------------
 
-        st.subheader("Best Insurer by Age Slab")
+        st.subheader("Best Pricing by Age Slab")
 
         bins = [18, 25, 35, 45, 55, 100]
 
@@ -339,19 +428,19 @@ if uploaded_files:
             right=True
         )
 
-        slab_analysis = (
+        slab = (
             final_df.groupby(
                 ['Age_Slab', 'Insurer']
-            )['Commercial_Score']
+            )['Rate_Per_Lakh']
             .mean()
             .reset_index()
         )
 
         best_slab = (
-            slab_analysis.loc[
-                slab_analysis.groupby('Age_Slab')[
-                    'Commercial_Score'
-                ].idxmax()
+            slab.loc[
+                slab.groupby('Age_Slab')[
+                    'Rate_Per_Lakh'
+                ].idxmin()
             ]
         )
 
@@ -361,105 +450,14 @@ if uploaded_files:
         )
 
         # ---------------------------------------------------
-        # WHY THIS INSURER IS BEST
-        # ---------------------------------------------------
-
-        st.subheader("Why This Insurer is Best")
-
-        lowest_rate_insurer = (
-            final_df.groupby('Insurer')[
-                'Rate_Per_Lakh'
-            ]
-            .mean()
-            .idxmin()
-        )
-
-        highest_coa_insurer = (
-            final_df.groupby('Insurer')[
-                'COA'
-            ]
-            .mean()
-            .idxmax()
-        )
-
-        best_age_slab = (
-            best_slab[
-                best_slab['Insurer'] ==
-                overall_best['Insurer']
-            ]['Age_Slab']
-        )
-
-        if len(best_age_slab) > 0:
-
-            best_age_slab = ", ".join(
-                best_age_slab.astype(str)
-            )
-
-        else:
-
-            best_age_slab = "All Segments"
-
-        rate_std = (
-            final_df.groupby('Insurer')[
-                'Rate_Per_Lakh'
-            ]
-            .std()
-        )
-
-        most_stable = rate_std.idxmin()
-
-        reason_text = f"""
-### Best Commercial Insurer:
-{overall_best['Insurer']}
-
-### Why?
-
-- Strong balance between pricing and COA
-- Competitive pricing across multiple tenures
-- Better commercial attractiveness
-- Strongest in age slab(s):
-  {best_age_slab}
-
-### Additional Insights
-
-- Lowest overall pricing:
-  {lowest_rate_insurer}
-
-- Highest COA opportunity:
-  {highest_coa_insurer}
-
-- Most stable pricing:
-  {most_stable}
-
-### Commercial Score Logic
-
-Commercial Score =
-(70% Pricing Competitiveness)
-+
-(30% COA Attractiveness)
-
-Lower rates improve:
-- customer conversion
-- scalability
-- competitiveness
-
-Higher COA improves:
-- broker economics
-- acquisition revenue
-"""
-
-        st.info(reason_text)
-
-        # ---------------------------------------------------
         # AGE VS RATE GRAPH
         # ---------------------------------------------------
 
         st.subheader("Age vs Rate Comparison")
 
         selected_chart_tenure = st.selectbox(
-            "Select Tenure for Age Comparison",
-            sorted(final_df['Tenure'].unique()),
-            key='age_chart'
+            "Select Tenure",
+            sorted(final_df['Tenure'].unique())
         )
 
         chart_df = final_df[
@@ -475,10 +473,6 @@ Higher COA improves:
             title=f'Age vs Rate | Tenure {selected_chart_tenure}'
         )
 
-        fig_age.update_layout(
-            height=500
-        )
-
         st.plotly_chart(
             fig_age,
             use_container_width=True
@@ -491,7 +485,7 @@ Higher COA improves:
         st.subheader("Tenure vs Rate Comparison")
 
         selected_chart_age = st.selectbox(
-            "Select Age for Tenure Comparison",
+            "Select Age",
             sorted(final_df['Age'].unique()),
             key='tenure_chart'
         )
@@ -509,32 +503,9 @@ Higher COA improves:
             title=f'Tenure vs Rate | Age {selected_chart_age}'
         )
 
-        fig_tenure.update_layout(
-            height=500
-        )
-
         st.plotly_chart(
             fig_tenure,
             use_container_width=True
-        )
-
-        # ---------------------------------------------------
-        # BUSINESS INSIGHTS
-        # ---------------------------------------------------
-
-        st.subheader("Business Insights")
-
-        st.info(
-            f"""
-Lowest Pricing Overall:
-{lowest_rate_insurer}
-
-Highest COA Opportunity:
-{highest_coa_insurer}
-
-Best Commercial Insurer:
-{overall_best['Insurer']}
-"""
         )
 
         # ---------------------------------------------------
